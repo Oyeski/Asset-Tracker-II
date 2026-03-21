@@ -921,6 +921,11 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
         ⚡ Select your ERP system below. AssetTrack syncs asset data bidirectionally via REST API. Field users never see or configure this.
       </div>
       <div class="erp-grid">
+        <div class="erp-card" onclick="selErp('sheets')" style="border-color:rgba(52,168,83,.3);background:rgba(52,168,83,.04);">
+          <div class="erp-ico">📊</div>
+          <div class="erp-nm" style="color:#1e8449;">Google Sheets FAR</div>
+          <div class="erp-st" id="erp-st-sheets">Not connected</div>
+        </div>
         <div class="erp-card" onclick="selErp('sap')"><div class="erp-ico">🔷</div><div class="erp-nm">SAP S/4HANA</div><div class="erp-st" id="erp-st-sap">Not connected</div></div>
         <div class="erp-card" onclick="selErp('oracle')"><div class="erp-ico">🔴</div><div class="erp-nm">Oracle Fusion</div><div class="erp-st" id="erp-st-oracle">Not connected</div></div>
         <div class="erp-card" onclick="selErp('dynamics')"><div class="erp-ico">🟦</div><div class="erp-nm">MS Dynamics 365</div><div class="erp-st" id="erp-st-dynamics">Not connected</div></div>
@@ -928,6 +933,104 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
         <div class="erp-card" onclick="selErp('sage')"><div class="erp-ico">🟢</div><div class="erp-nm">Sage 300</div><div class="erp-st" id="erp-st-sage">Not connected</div></div>
         <div class="erp-card" onclick="selErp('custom')"><div class="erp-ico">⚙️</div><div class="erp-nm">Custom REST API</div><div class="erp-st" id="erp-st-custom">Not connected</div></div>
       </div>
+
+      <!-- ── Google Sheets FAR Config (shown when sheets selected) ── -->
+      <div class="erp-cfg" id="erp-cfg-sheets">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+          <span style="font-size:24px;">📊</span>
+          <div>
+            <div class="card-ttl" style="margin:0;">Google Sheets — Fixed Asset Register</div>
+            <div style="font-size:11px;color:var(--text3);">Two-way sync via Google Apps Script Web App</div>
+          </div>
+        </div>
+
+        <!-- Step 1: Deploy script -->
+        <div class="setup-sect" style="margin-bottom:14px;">
+          <div class="setup-hdr"><div class="setup-hdr-ttl">Step 1 — Deploy the Apps Script to your Google Sheet</div></div>
+          <div class="setup-body" style="font-size:12px;color:var(--text2);line-height:1.9;">
+            <ol style="padding-left:18px;margin:0;">
+              <li>Open your Google Sheet → click <strong>Extensions → Apps Script</strong></li>
+              <li>Delete all existing code in the editor</li>
+              <li>Paste the script below and click <strong>Save (Ctrl+S)</strong></li>
+              <li>Click <strong>Deploy → New deployment → Web App</strong></li>
+              <li>Set <em>Execute as:</em> <strong>Me</strong> · Set <em>Who has access:</em> <strong>Anyone</strong></li>
+              <li>Click <strong>Deploy</strong> → copy the Web App URL and paste it below</li>
+            </ol>
+            <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
+              <button class="copy-btn" onclick="copySheetScript()">📋 Copy Apps Script Code</button>
+              <span style="font-size:11px;color:var(--text3);">~60 lines — paste into Apps Script editor</span>
+            </div>
+            <div id="sheet-script-block" class="sql-block" style="margin-top:10px;font-size:10px;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div>
+          </div>
+        </div>
+
+        <!-- Step 2: Configure -->
+        <div class="setup-sect" style="margin-bottom:14px;">
+          <div class="setup-hdr"><div class="setup-hdr-ttl">Step 2 — Configure the connection</div></div>
+          <div class="setup-body">
+            <div class="fg"><div class="fl">Web App URL <span class="req">REQUIRED</span></div>
+              <input class="fi" type="text" id="gs-url" placeholder="https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec">
+            </div>
+            <div class="fr">
+              <div class="fg"><div class="fl">Sheet Name (tab)</div>
+                <input class="fi" type="text" id="gs-sheet" placeholder="Sheet1" value="Sheet1">
+              </div>
+              <div class="fg"><div class="fl">Sync Direction</div>
+                <select class="fi" id="gs-dir">
+                  <option value="both">Both — Push &amp; Pull</option>
+                  <option value="push">Push only (AssetTrack → Sheets)</option>
+                  <option value="pull">Pull only (Sheets → AssetTrack)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 3: Column Mapping -->
+        <div class="setup-sect" style="margin-bottom:14px;">
+          <div class="setup-hdr"><div class="setup-hdr-ttl">Step 3 — Map your sheet columns to AssetTrack fields</div></div>
+          <div class="setup-body">
+            <div style="font-size:11px;color:var(--text2);margin-bottom:12px;">Enter the exact column header from your sheet for each AssetTrack field. Leave blank to skip that field.</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div class="fg"><div class="fl">Barcode / Asset Code <span class="req">REQUIRED</span></div><input class="fi" id="gs-col-barcode" placeholder="Asset Code"></div>
+              <div class="fg"><div class="fl">Asset Name / Description</div><input class="fi" id="gs-col-name" placeholder="Description"></div>
+              <div class="fg"><div class="fl">Category</div><input class="fi" id="gs-col-cat" placeholder="Category"></div>
+              <div class="fg"><div class="fl">Location</div><input class="fi" id="gs-col-loc" placeholder="Location"></div>
+              <div class="fg"><div class="fl">Department</div><input class="fi" id="gs-col-dept" placeholder="Department"></div>
+              <div class="fg"><div class="fl">Custodian</div><input class="fi" id="gs-col-cust" placeholder="Custodian"></div>
+              <div class="fg"><div class="fl">Serial Number</div><input class="fi" id="gs-col-serial" placeholder="Serial No."></div>
+              <div class="fg"><div class="fl">Status</div><input class="fi" id="gs-col-status" placeholder="Status"></div>
+              <div class="fg"><div class="fl">Condition</div><input class="fi" id="gs-col-cond" placeholder="Condition"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:12px;">
+          <button class="act-btn btn-p" onclick="testSheetsConnection()">🔌 Test Connection</button>
+          <button class="act-btn btn-g" onclick="pushToSheets()">⬆ Push Assets → Sheets</button>
+          <button class="act-btn btn-s" onclick="pullFromSheets()">⬇ Pull FAR → AssetTrack</button>
+          <button class="act-btn btn-s" onclick="saveSheetsConfig()">💾 Save Config</button>
+          <button class="act-btn btn-d" onclick="resetSheetsSync()">↺ Reset Sync Status</button>
+        </div>
+
+        <!-- Sync log -->
+        <div style="font-family:var(--fh);font-size:11px;color:var(--text2);font-weight:800;margin-bottom:6px;">Sync Log</div>
+        <div id="gs-log" style="background:var(--surf2);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:10px;color:var(--text2);min-height:50px;max-height:180px;overflow-y:auto;font-family:monospace;line-height:1.8;"></div>
+
+        <!-- Sync status table -->
+        <div style="margin-top:14px;" id="gs-status-wrap" style="display:none;">
+          <div class="card-ttl">Sync Status per Asset</div>
+          <div style="overflow-x:auto;">
+            <table class="tbl" id="gs-status-tbl">
+              <thead><tr><th>Asset</th><th>Barcode</th><th>Sheets Status</th><th>Last Synced</th></tr></thead>
+              <tbody id="gs-status-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Generic ERP Config (other ERPs) ── -->
       <div class="erp-cfg" id="erp-cfg">
         <div class="card-ttl" id="erp-cfg-ttl">Configure ERP</div>
         <div class="fr">
@@ -3400,14 +3503,354 @@ async function saveConfig(){
 // ERP
 // ══════════════════════════════════════════════════════
 let selectedErp=null;
-const ERP_NAMES={sap:'SAP S/4HANA',oracle:'Oracle Fusion',dynamics:'MS Dynamics 365',odoo:'Odoo',sage:'Sage 300',custom:'Custom REST API'};
+const ERP_NAMES={sap:'SAP S/4HANA',oracle:'Oracle Fusion',dynamics:'MS Dynamics 365',odoo:'Odoo',sage:'Sage 300',custom:'Custom REST API',sheets:'Google Sheets FAR'};
 function selErp(id){
   selectedErp=id;
   document.querySelectorAll('.erp-card').forEach(c=>c.classList.remove('on'));
   event.currentTarget.classList.add('on');
-  document.getElementById('erp-cfg').classList.add('show');
-  document.getElementById('erp-cfg-ttl').textContent='Configure '+ERP_NAMES[id];
+  // Hide both config panels first
+  document.getElementById('erp-cfg').classList.remove('show');
+  document.getElementById('erp-cfg-sheets').classList.remove('show');
+  if(id==='sheets'){
+    document.getElementById('erp-cfg-sheets').classList.add('show');
+    loadSheetsConfig();
+    renderSheetsScriptBlock();
+  } else {
+    document.getElementById('erp-cfg').classList.add('show');
+    document.getElementById('erp-cfg-ttl').textContent='Configure '+ERP_NAMES[id];
+  }
+  const el=document.getElementById('erp-log');el.style.display='block';
+  logErp('Selected: '+ERP_NAMES[id]);
 }
+
+// ══════════════════════════════════════════════════════
+// GOOGLE SHEETS FAR SYNC
+// ══════════════════════════════════════════════════════
+const GS_SCRIPT_CODE=`// ═══════════════════════════════════════════════════════════
+// AssetTrack Pro — Google Sheets FAR Sync Script
+// Paste this into Extensions → Apps Script, then Deploy as Web App
+// Execute as: Me | Access: Anyone
+// ═══════════════════════════════════════════════════════════
+
+const SHEET_NAME = 'Sheet1'; // Change to your tab name if different
+
+function doGet(e) {
+  // PULL: AssetTrack calls GET to fetch all FAR rows
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
+    const data = sheet.getDataRange().getValues();
+    if (data.length < 2) return jsonResponse({ rows: [], headers: [] });
+    const headers = data[0].map(String);
+    const rows = data.slice(1).map(row =>
+      Object.fromEntries(headers.map((h, i) => [h, String(row[i] || '')]))
+    );
+    return jsonResponse({ rows, headers, total: rows.length });
+  } catch(err) {
+    return jsonResponse({ error: err.message });
+  }
+}
+
+function doPost(e) {
+  // PUSH: AssetTrack sends assets as JSON array
+  try {
+    const payload = JSON.parse(e.postData.contents);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
+
+    if (payload.action === 'test') {
+      const headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
+      return jsonResponse({ ok: true, sheet: sheet.getName(), columns: headers, rows: sheet.getLastRow()-1 });
+    }
+
+    if (payload.action === 'push' && Array.isArray(payload.assets)) {
+      const headers = sheet.getLastRow() > 0
+        ? sheet.getRange(1,1,1,Math.max(sheet.getLastColumn(),1)).getValues()[0].map(String)
+        : [];
+
+      // Build header row if sheet is empty
+      const stdHeaders = ['Asset Code','Asset Name','Category','Sub-Category',
+        'Location','Department','Status','Condition','Custodian','Serial No.',
+        'Registered By','Date Registered','Last Audit Date','Notes','AssetTrack ID'];
+      if (headers.length === 0 || (headers.length === 1 && !headers[0])) {
+        sheet.getRange(1,1,1,stdHeaders.length).setValues([stdHeaders]);
+        sheet.getRange(1,1,1,stdHeaders.length).setFontWeight('bold')
+          .setBackground('#1e8449').setFontColor('#ffffff');
+      }
+
+      const colHeaders = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0].map(String);
+      let pushed = 0, updated = 0;
+
+      payload.assets.forEach(asset => {
+        // Find existing row by Asset Code (barcode)
+        const col = colHeaders.indexOf('Asset Code') + 1;
+        if (col > 0) {
+          const colData = sheet.getRange(2, col, Math.max(sheet.getLastRow()-1,1), 1).getValues();
+          const existIdx = colData.findIndex(r => String(r[0]) === String(asset.barcode||''));
+          if (existIdx >= 0) {
+            // Update existing row
+            const rowNum = existIdx + 2;
+            writeAssetRow(sheet, colHeaders, rowNum, asset);
+            updated++;
+            return;
+          }
+        }
+        // Append new row
+        const newRow = buildRow(colHeaders, asset);
+        sheet.appendRow(newRow);
+        pushed++;
+      });
+
+      return jsonResponse({ ok: true, pushed, updated, total: pushed + updated });
+    }
+
+    return jsonResponse({ error: 'Unknown action' });
+  } catch(err) {
+    return jsonResponse({ error: err.message });
+  }
+}
+
+function buildRow(headers, asset) {
+  const map = {
+    'Asset Code': asset.barcode, 'Asset Name': asset.name,
+    'Category': asset.category, 'Sub-Category': asset.sub_category,
+    'Location': asset.location, 'Department': asset.department,
+    'Status': asset.status, 'Condition': asset.condition,
+    'Custodian': asset.custodian, 'Serial No.': asset.serial,
+    'Registered By': asset.registered_by,
+    'Date Registered': asset.created_at ? new Date(asset.created_at).toLocaleDateString() : '',
+    'Last Audit Date': asset.last_audit_date ? new Date(asset.last_audit_date).toLocaleDateString() : '',
+    'Notes': asset.notes, 'AssetTrack ID': asset.id
+  };
+  return headers.map(h => map[h] !== undefined ? (map[h] || '') : '');
+}
+
+function writeAssetRow(sheet, headers, rowNum, asset) {
+  const row = buildRow(headers, asset);
+  sheet.getRange(rowNum, 1, 1, row.length).setValues([row]);
+}
+
+function jsonResponse(data) {
+  return ContentService.createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
+}`;
+
+let gsSyncStatus={};  // barcode → {status, ts}
+
+function renderSheetsScriptBlock(){
+  const el=document.getElementById('sheet-script-block');
+  if(el)el.textContent=GS_SCRIPT_CODE;
+}
+
+function copySheetScript(){
+  navigator.clipboard&&navigator.clipboard.writeText(GS_SCRIPT_CODE);
+  toast('✅ Apps Script code copied — paste into Extensions → Apps Script','ok');
+}
+
+function loadSheetsConfig(){
+  const cfg=JSON.parse(localStorage.getItem('atp_erp_sheets')||'{}');
+  if(cfg.url)document.getElementById('gs-url').value=cfg.url||'';
+  if(cfg.sheet)document.getElementById('gs-sheet').value=cfg.sheet||'Sheet1';
+  if(cfg.dir)document.getElementById('gs-dir').value=cfg.dir||'both';
+  // Column mapping
+  const cols={barcode:'Asset Code',name:'Description',cat:'Category',loc:'Location',
+    dept:'Department',cust:'Custodian',serial:'Serial No.',status:'Status',cond:'Condition'};
+  Object.entries(cols).forEach(([k,def])=>{
+    const el=document.getElementById('gs-col-'+k);
+    if(el)el.value=cfg['col_'+k]||def;
+  });
+  gsSyncStatus=cfg.syncStatus||{};
+}
+
+function saveSheetsConfig(){
+  const cfg={
+    url:document.getElementById('gs-url').value.trim(),
+    sheet:document.getElementById('gs-sheet').value.trim()||'Sheet1',
+    dir:document.getElementById('gs-dir').value,
+    col_barcode:document.getElementById('gs-col-barcode').value.trim(),
+    col_name:document.getElementById('gs-col-name').value.trim(),
+    col_cat:document.getElementById('gs-col-cat').value.trim(),
+    col_loc:document.getElementById('gs-col-loc').value.trim(),
+    col_dept:document.getElementById('gs-col-dept').value.trim(),
+    col_cust:document.getElementById('gs-col-cust').value.trim(),
+    col_serial:document.getElementById('gs-col-serial').value.trim(),
+    col_status:document.getElementById('gs-col-status').value.trim(),
+    col_cond:document.getElementById('gs-col-cond').value.trim(),
+    syncStatus:gsSyncStatus
+  };
+  if(!cfg.url){toast('Enter the Web App URL first','err');return;}
+  localStorage.setItem('atp_erp_sheets',JSON.stringify(cfg));
+  document.getElementById('erp-st-sheets').textContent='Configured';
+  toast('✅ Google Sheets config saved','ok');
+}
+
+function gsLog(msg,color='var(--text2)'){
+  const el=document.getElementById('gs-log');
+  if(!el)return;
+  el.style.display='block';
+  const ts=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  el.innerHTML+=`<div style="color:${color};">[${ts}] ${msg}</div>`;
+  el.scrollTop=el.scrollHeight;
+}
+
+function getGsUrl(){return (document.getElementById('gs-url')||{}).value?.trim()||'';}
+function getGsColMap(){
+  return {
+    barcode:document.getElementById('gs-col-barcode').value.trim()||'Asset Code',
+    name:document.getElementById('gs-col-name').value.trim()||'Description',
+    cat:document.getElementById('gs-col-cat').value.trim()||'Category',
+    loc:document.getElementById('gs-col-loc').value.trim()||'Location',
+    dept:document.getElementById('gs-col-dept').value.trim()||'Department',
+    cust:document.getElementById('gs-col-cust').value.trim()||'Custodian',
+    serial:document.getElementById('gs-col-serial').value.trim()||'Serial No.',
+    status:document.getElementById('gs-col-status').value.trim()||'Status',
+    cond:document.getElementById('gs-col-cond').value.trim()||'Condition',
+  };
+}
+
+async function testSheetsConnection(){
+  const url=getGsUrl();
+  if(!url){toast('Enter the Web App URL first','err');return;}
+  gsLog('Testing connection to Google Sheets…');
+  try{
+    const res=await fetch(url,{method:'POST',
+      headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'test'})
+    });
+    if(!res.ok){gsLog('✗ HTTP '+res.status+' — check the Web App URL','var(--acc3)');return;}
+    const data=await res.json();
+    if(data.error){gsLog('✗ Script error: '+data.error,'var(--acc3)');return;}
+    gsLog(`✓ Connected to sheet: "${data.sheet}" · ${data.rows} existing rows · Columns: ${(data.columns||[]).join(', ')}`,`var(--acc)`);
+    document.getElementById('erp-st-sheets').textContent='✓ Connected';
+    toast('✅ Connection successful','ok');
+  }catch(e){
+    gsLog('✗ Connection failed: '+e.message+' — make sure Web App is deployed with "Anyone" access','var(--acc3)');
+    toast('Connection failed — see sync log','err');
+  }
+}
+
+async function pushToSheets(){
+  const url=getGsUrl();
+  if(!url){toast('Enter the Web App URL first','err');return;}
+  const wsAssets=activeCompanyId?allAssets.filter(a=>a.company_id===activeCompanyId):allAssets;
+  if(!wsAssets.length){toast('No assets to push','err');return;}
+  gsLog(`Pushing ${wsAssets.length} asset${wsAssets.length!==1?'s':''} to Google Sheets…`);
+  try{
+    const res=await fetch(url,{
+      method:'POST',
+      headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'push',assets:wsAssets})
+    });
+    if(!res.ok){gsLog('✗ HTTP '+res.status,'var(--acc3)');return;}
+    const data=await res.json();
+    if(data.error){gsLog('✗ '+data.error,'var(--acc3)');return;}
+    gsLog(`✓ Push complete — ${data.pushed||0} new rows added, ${data.updated||0} rows updated`,'var(--acc)');
+    // Update sync status
+    const ts=new Date().toISOString();
+    wsAssets.forEach(a=>{gsSyncStatus[a.barcode]={status:'Synced',ts};});
+    saveSheetsConfig();
+    renderGsSyncStatus(wsAssets);
+    document.getElementById('erp-st-sheets').textContent='✓ Synced';
+    toast(`✅ ${(data.pushed||0)+(data.updated||0)} assets synced to Google Sheets`,'ok');
+  }catch(e){
+    gsLog('✗ Push failed: '+e.message,'var(--acc3)');
+    toast('Push failed — see sync log','err');
+  }
+}
+
+async function pullFromSheets(){
+  const url=getGsUrl();
+  if(!url){toast('Enter the Web App URL first','err');return;}
+  gsLog('Pulling FAR records from Google Sheets…');
+  const colMap=getGsColMap();
+  try{
+    const res=await fetch(url+'?action=pull');
+    if(!res.ok){gsLog('✗ HTTP '+res.status,'var(--acc3)');return;}
+    const data=await res.json();
+    if(data.error){gsLog('✗ '+data.error,'var(--acc3)');return;}
+    const rows=data.rows||[];
+    if(!rows.length){gsLog('ℹ Sheet is empty — nothing to pull','var(--acc2)');return;}
+    gsLog(`Found ${rows.length} rows in sheet. Importing into AssetTrack…`);
+    let added=0,skipped=0,updated=0;
+    const now=new Date().toISOString();
+    rows.forEach(row=>{
+      const barcode=row[colMap.barcode]||row['Asset Code']||'';
+      if(!barcode){skipped++;return;}
+      const existing=allAssets.find(a=>a.barcode===barcode);
+      const asset={
+        id:existing?existing.id:'FAR-'+Date.now()+'-'+Math.random().toString(36).slice(2,6),
+        barcode,
+        name:row[colMap.name]||row['Asset Name']||row['Description']||barcode,
+        category:row[colMap.cat]||row['Category']||'',
+        sub_category:row['Sub-Category']||'',
+        location:row[colMap.loc]||row['Location']||'',
+        department:row[colMap.dept]||row['Department']||'',
+        status:row[colMap.status]||row['Status']||STATUS_OPTIONS[0]||'Active',
+        condition:row[colMap.cond]||row['Condition']||CONDITION_OPTIONS[1]||'Good',
+        custodian:row[colMap.cust]||row['Custodian']||'',
+        serial:row[colMap.serial]||row['Serial No.']||'',
+        notes:row['Notes']||'',
+        photos:[],
+        registered_by:'FAR Import',
+        company_id:activeCompanyId||null,
+        created_at:row['Date Registered']?new Date(row['Date Registered']).toISOString():now,
+        _fromSheets:true
+      };
+      if(existing){
+        Object.assign(existing,{
+          name:asset.name,location:asset.location,department:asset.department,
+          status:asset.status,condition:asset.condition,custodian:asset.custodian,
+          serial:asset.serial,notes:asset.notes
+        });
+        if(CONFIGURED)sb.update('assets',existing.id,existing).catch(()=>{});
+        updated++;
+      } else {
+        allAssets.push(asset);
+        if(CONFIGURED)sb.insert('assets',asset).catch(()=>{});
+        added++;
+      }
+      gsSyncStatus[barcode]={status:'Pulled',ts:now};
+    });
+    saveSheetsConfig();
+    gsLog(`✓ Pull complete — ${added} new assets, ${updated} updated, ${skipped} skipped (no barcode)`,'var(--acc)');
+    renderAssets();refreshDash();
+    renderGsSyncStatus(allAssets.filter(a=>gsSyncStatus[a.barcode]));
+    document.getElementById('erp-st-sheets').textContent='✓ Synced';
+    toast(`✅ ${added+updated} assets imported from Google Sheets`,'ok');
+  }catch(e){
+    gsLog('✗ Pull failed: '+e.message,'var(--acc3)');
+    toast('Pull failed — see sync log','err');
+  }
+}
+
+function renderGsSyncStatus(assets){
+  const wrap=document.getElementById('gs-status-wrap');
+  const tbody=document.getElementById('gs-status-tbody');
+  if(!wrap||!tbody)return;
+  wrap.style.display='block';
+  const _fmt=ts=>{try{return new Date(ts).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});}catch(e){return ts||'—';}};
+  tbody.innerHTML=(assets||[]).map(a=>{
+    const s=gsSyncStatus[a.barcode]||{};
+    const cls=s.status==='Synced'?'bu':s.status==='Pulled'?'ba':'bm';
+    return `<tr>
+      <td style="font-size:12px;color:var(--text);">${a.name||'—'}</td>
+      <td style="font-family:monospace;font-size:10px;color:var(--acc);">${a.barcode||'—'}</td>
+      <td><span class="badge ${cls}" style="font-size:10px;">${s.status||'Not synced'}</span></td>
+      <td style="font-size:10px;color:var(--text3);">${_fmt(s.ts)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function resetSheetsSync(){
+  if(!confirm('Reset all sync status records? This does not delete sheet data.'))return;
+  gsSyncStatus={};
+  saveSheetsConfig();
+  const tbody=document.getElementById('gs-status-tbody');
+  if(tbody)tbody.innerHTML='';
+  gsLog('Sync status reset','var(--acc2)');
+  toast('Sync status cleared','ok');
+}
+
 function logErp(msg,color='var(--text2)'){
   const el=document.getElementById('erp-log');el.style.display='block';
   el.innerHTML+=`<div style="color:${color};">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
