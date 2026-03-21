@@ -1540,20 +1540,50 @@ async function saveAsset(){
   if(!photos[0]){toast('Main photo is mandatory','err');return;}
   if(!validateCustomFields())return;
   // ── Barcode duplicate check ──────────────────────────────────────
+  // Step 1: Always check current session first (catches rapid re-submissions
+  // before the first save has completed writing to Supabase)
+  const sessionDup=sessionAssets.find(a=>a.barcode===bc);
+  if(sessionDup){
+    toast(`Already registered this session: ${sessionDup.name||bc}`,'err');
+    document.getElementById('reg-submit-btn').disabled=false;
+    return;
+  }
+
   if(CONFIGURED){
     try{
-      const existing=await sb.query('assets',`?barcode=eq.${encodeURIComponent(bc)}&company_id=eq.${currentUser.company_id||''}&select=id,name`);
+      // Fix: use OR logic to catch both NULL company_id and matching company_id,
+      // rather than a strict company_id=eq. filter that misses NULL rows
+      const companyId=currentUser.company_id||null;
+      let query=`?barcode=eq.${encodeURIComponent(bc)}&select=id,name,company_id`;
+      const existing=await sb.query('assets',query);
       if(existing&&existing.length){
-        toast(`Barcode already registered: ${existing[0].name||existing[0].id}`,'err');
-        document.getElementById('reg-submit-btn').disabled=false;
-        return;
+        // Filter client-side: match if same company OR if no company scoping
+        const match=existing.find(a=>
+          !companyId||          // no company on current user → match any
+          !a.company_id||       // asset has no company → treat as global
+          a.company_id===companyId // same company
+        );
+        if(match){
+          toast(`Barcode already registered: ${match.name||match.id}`,'err');
+          document.getElementById('reg-submit-btn').disabled=false;
+          return;
+        }
       }
-    }catch(e){/* allow save if check fails */}
+    }catch(e){
+      // Do NOT silently allow — warn the user and block the save
+      toast('⚠ Could not verify barcode — check connection and retry','err');
+      logFieldErr('dupCheck',e.message,'barcode='+bc);
+      document.getElementById('reg-submit-btn').disabled=false;
+      return;
+    }
   } else {
+    // Demo / offline mode — check localStorage
     const allLocal=getLocalAssets();
     const companyId=currentUser.company_id||null;
-    const dup=allLocal.find(a=>a.barcode===bc&&(!companyId||!a.company_id||a.company_id===companyId));
-    if(dup){toast(`Barcode already registered: ${dup.name||dup.id}`,'err');return;}
+    const dup=allLocal.find(a=>
+      a.barcode===bc&&(!companyId||!a.company_id||a.company_id===companyId)
+    );
+    if(dup){toast(`Barcode already registered: ${dup.name||dup.id}`,'err');document.getElementById('reg-submit-btn').disabled=false;return;}
   }
 
   const fromAudit=!!document.getElementById('audit-reg-banner');

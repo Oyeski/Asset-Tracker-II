@@ -322,6 +322,7 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
       <button class="nav-item" onclick="show('customfields')"><span class="ni">🧩</span>Custom Fields</button>
       <button class="nav-item" onclick="show('import')"><span class="ni">📥</span>Import Data</button>
       <div class="sb-sect">Data & Integrations</div>
+      <button class="nav-item" onclick="show('activity')"><span class="ni">📜</span>Activity History</button>
       <button class="nav-item" onclick="show('reports')"><span class="ni">📋</span>Reports & Export</button>
       <button class="nav-item" onclick="show('erp')" data-admin-only><span class="ni">🔗</span>ERP Sync</button>
       <button class="nav-item" onclick="show('database')" data-admin-only><span class="ni">🗄️</span>Database Setup</button>
@@ -789,6 +790,89 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
         </div>
       </div>
       <div id="imp-result" style="display:none;"></div>
+    </div>
+
+    <!-- ══ ACTIVITY HISTORY ══ -->
+    <div class="panel" id="p-activity">
+      <div class="panel-hdr">
+        <div>
+          <div class="panel-ttl">Activity History</div>
+          <div class="panel-sub">Full audit trail — registrations, edits, logins, and photo retakes across all field officers</div>
+        </div>
+        <div style="display:flex;gap:9px;">
+          <button class="act-btn btn-s" onclick="exportActivityCSV()">⬇ Export CSV</button>
+          <button class="act-btn btn-p" onclick="loadActivityHistory()">🔄 Refresh</button>
+        </div>
+      </div>
+
+      <!-- KPI Strip -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">
+        <div class="kpi c1"><div class="ki">📝</div><div class="kl">Total Events</div><div class="kv" id="ah-total">—</div><div class="ks">in log</div></div>
+        <div class="kpi c4"><div class="ki">📦</div><div class="kl">Registrations</div><div class="kv" id="ah-reg">—</div><div class="ks">assets added</div></div>
+        <div class="kpi c2"><div class="ki">✏️</div><div class="kl">Edits</div><div class="kv" id="ah-edit">—</div><div class="ks">field changes</div></div>
+        <div class="kpi c3"><div class="ki">🔑</div><div class="kl">Logins</div><div class="kv" id="ah-login">—</div><div class="ks">sessions</div></div>
+      </div>
+
+      <!-- Filters -->
+      <div class="card" style="padding:14px 16px;margin-bottom:14px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:10px;align-items:flex-end;">
+          <div>
+            <div class="fl">Officer / User</div>
+            <select class="fi" id="ah-f-user" onchange="renderActivityTable()">
+              <option value="">All Officers</option>
+            </select>
+          </div>
+          <div>
+            <div class="fl">Action Type</div>
+            <select class="fi" id="ah-f-action" onchange="renderActivityTable()">
+              <option value="">All Actions</option>
+              <option value="LOGIN">Login</option>
+              <option value="REGISTER">Register</option>
+              <option value="EDIT">Edit</option>
+              <option value="PHOTO_RETAKE">Photo Retake</option>
+              <option value="AUDIT">Audit</option>
+            </select>
+          </div>
+          <div>
+            <div class="fl">From Date</div>
+            <input class="fi" type="date" id="ah-f-from" onchange="renderActivityTable()">
+          </div>
+          <div>
+            <div class="fl">To Date</div>
+            <input class="fi" type="date" id="ah-f-to" onchange="renderActivityTable()">
+          </div>
+          <div>
+            <button class="act-btn btn-s" style="width:100%;" onclick="clearActivityFilters()">✕ Clear</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Results count -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div style="font-size:12px;color:var(--text2);font-weight:700;" id="ah-result-count"></div>
+        <div style="font-size:11px;color:var(--text3);">Showing latest 1,000 events</div>
+      </div>
+
+      <!-- Table -->
+      <div class="card" style="padding:0;overflow:hidden;">
+        <div style="overflow-x:auto;">
+          <table class="tbl" id="ah-table">
+            <thead>
+              <tr>
+                <th style="width:130px;">Date & Time</th>
+                <th style="width:90px;">Action</th>
+                <th>Officer</th>
+                <th>Asset / Barcode</th>
+                <th>Changes / Detail</th>
+                <th style="width:140px;">Location</th>
+              </tr>
+            </thead>
+            <tbody id="ah-tbody">
+              <tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text3);font-size:12px;">Click Refresh to load activity history.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <!-- ══ REPORTS ══ -->
@@ -2222,6 +2306,7 @@ function show(name){
   if(ni)ni.classList.add('on');
   const sb=document.getElementById('sidebar');if(sb)sb.classList.remove('open');
   // Panel-specific init
+  if(name==='activity'){loadActivityHistory();}
   if(name==='superowner'){renderSuperOwner();}
   if(name==='companies'){renderCompanies();}
   if(name==='assets'){
@@ -3823,6 +3908,198 @@ async function updateConnBadge(){
     el.style.cssText='font-size:9px;padding:2px 8px;border-radius:4px;font-weight:700;letter-spacing:.5px;background:rgba(255,72,88,.15);color:var(--acc3);border:1px solid rgba(255,72,88,.25);';
     el.title='Could not reach Supabase: '+e.message;
   }
+}
+
+// ══════════════════════════════════════════════════════
+// ACTIVITY HISTORY
+// ══════════════════════════════════════════════════════
+let activityLog=[];   // full loaded set
+let activityFiltered=[];  // after filters applied
+
+async function loadActivityHistory(){
+  const tbody=document.getElementById('ah-tbody');
+  const countEl=document.getElementById('ah-result-count');
+  if(tbody)tbody.innerHTML='<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text3);font-size:12px;">⏳ Loading…</td></tr>';
+
+  if(CONFIGURED){
+    try{
+      // Load up to 1000 most recent entries across all companies
+      const q=activeCompanyId
+        ?`?company_id=eq.${activeCompanyId}&select=*&order=audited_at.desc&limit=1000`
+        :`?select=*&order=audited_at.desc&limit=1000`;
+      const res=await sb.query('audit_log',q);
+      activityLog=Array.isArray(res)?res:[];
+    }catch(e){
+      toast('Could not load activity log — check connection','err');
+      activityLog=[];
+    }
+  } else {
+    // Demo mode — use in-memory auditLog
+    activityLog=Array.isArray(auditLog)?[...auditLog]:[];
+  }
+
+  // Also pull in capture_log registrations if they exist
+  if(CONFIGURED){
+    try{
+      const q2=activeCompanyId
+        ?`?company_id=eq.${activeCompanyId}&select=*&order=created_at.desc&limit=500`
+        :`?select=*&order=created_at.desc&limit=500`;
+      const capRes=await sb.query('capture_log',q2);
+      if(Array.isArray(capRes)&&capRes.length){
+        const capMapped=capRes.map(r=>({
+          id:'cap-'+r.id,
+          asset_id:r.asset_id||null,
+          company_id:r.company_id||null,
+          barcode:r.barcode||'',
+          action:'REGISTER',
+          changes:r.asset_name||'Asset registered',
+          audited_by:r.registered_by||'—',
+          audited_at:r.created_at||null,
+          notes:r.location||''
+        }));
+        // Merge and re-sort by date
+        activityLog=[...activityLog,...capMapped]
+          .sort((a,b)=>new Date(b.audited_at||0)-new Date(a.audited_at||0))
+          .slice(0,1000);
+      }
+    }catch(e){/* capture_log may not exist — silent */}
+  }
+
+  populateActivityUserFilter();
+  updateActivityKPIs();
+  renderActivityTable();
+  toast(`${activityLog.length} activity event${activityLog.length!==1?'s':''} loaded`,'ok');
+}
+
+function populateActivityUserFilter(){
+  const sel=document.getElementById('ah-f-user');
+  if(!sel)return;
+  const users=[...new Set(activityLog.map(l=>l.audited_by).filter(Boolean))].sort();
+  const cur=sel.value;
+  sel.innerHTML='<option value="">All Officers</option>'+
+    users.map(u=>`<option value="${u}" ${u===cur?'selected':''}>${u}</option>`).join('');
+}
+
+function updateActivityKPIs(){
+  document.getElementById('ah-total').textContent=activityLog.length;
+  document.getElementById('ah-reg').textContent=activityLog.filter(l=>l.action==='REGISTER').length;
+  document.getElementById('ah-edit').textContent=activityLog.filter(l=>l.action==='EDIT').length;
+  document.getElementById('ah-login').textContent=activityLog.filter(l=>l.action==='LOGIN').length;
+}
+
+function getActivityFiltered(){
+  const user=(document.getElementById('ah-f-user')||{}).value||'';
+  const action=(document.getElementById('ah-f-action')||{}).value||'';
+  const from=(document.getElementById('ah-f-from')||{}).value||'';
+  const to=(document.getElementById('ah-f-to')||{}).value||'';
+  return activityLog.filter(l=>{
+    if(user&&l.audited_by!==user)return false;
+    if(action&&l.action!==action)return false;
+    if(from&&l.audited_at&&l.audited_at<from)return false;
+    if(to&&l.audited_at&&l.audited_at>to+'T23:59:59')return false;
+    return true;
+  });
+}
+
+function renderActivityTable(){
+  const tbody=document.getElementById('ah-tbody');
+  const countEl=document.getElementById('ah-result-count');
+  if(!tbody)return;
+
+  activityFiltered=getActivityFiltered();
+  if(countEl)countEl.textContent=activityFiltered.length+' event'+(activityFiltered.length!==1?'s':'');
+
+  if(!activityFiltered.length){
+    tbody.innerHTML='<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text3);font-size:12px;">No events match the current filters.</td></tr>';
+    return;
+  }
+
+  const _fmtDT=d=>{
+    if(!d)return'—';
+    try{
+      const dt=new Date(d);
+      return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})
+        +'<br><span style="font-size:10px;color:var(--text3);">'
+        +dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'})
+        +'</span>';
+    }catch(e){return String(d);}
+  };
+
+  const ACTION_BADGE={
+    'LOGIN':   {cls:'ba', lbl:'Login'},
+    'REGISTER':{cls:'bu', lbl:'Register'},
+    'EDIT':    {cls:'bm', lbl:'Edit'},
+    'PHOTO_RETAKE':{cls:'bs', lbl:'Photo'},
+    'AUDIT':   {cls:'ba', lbl:'Audit'},
+  };
+
+  tbody.innerHTML=activityFiltered.map(l=>{
+    const ab=ACTION_BADGE[l.action]||{cls:'bd',lbl:l.action||'—'};
+    // Parse GPS from changes JSON if it's a LOGIN entry
+    let locationCell='—';
+    if(l.action==='LOGIN'&&l.changes){
+      try{
+        const gps=JSON.parse(l.changes);
+        if(gps.location)locationCell=`<span title="${gps.lat||''},${gps.lng||''}">${gps.location}</span>`;
+      }catch(e){locationCell=l.notes||'—';}
+    } else {
+      locationCell=l.notes||'—';
+    }
+    // Asset link — if we have a barcode, find the asset name
+    const assetName=l.changes&&l.action!=='LOGIN'&&l.action!=='EDIT'
+      ?l.changes
+      :(allAssets.find(a=>a.barcode===l.barcode||a.id===l.asset_id)?.name||'');
+    const assetCell=l.barcode
+      ?`<div style="font-size:12px;color:var(--text);font-weight:700;">${assetName||'—'}</div>
+         <div style="font-family:monospace;font-size:10px;color:var(--acc);">${l.barcode}</div>`
+      :'<span style="color:var(--text3);">—</span>';
+
+    const changesCell=l.action==='LOGIN'?'<span style="color:var(--text3);font-size:11px;">Session start</span>'
+      :l.action==='EDIT'?`<span style="font-size:11px;color:var(--text2);">${l.changes||'—'}</span>`
+      :l.action==='PHOTO_RETAKE'?'<span style="font-size:11px;color:var(--text2);">Photo replaced</span>'
+      :`<span style="font-size:11px;color:var(--text2);">${l.changes||'—'}</span>`;
+
+    return `<tr>
+      <td style="white-space:nowrap;font-size:11px;">${_fmtDT(l.audited_at)}</td>
+      <td><span class="badge ${ab.cls}" style="font-size:10px;">${ab.lbl}</span></td>
+      <td style="font-size:12px;color:var(--text);font-weight:700;">${l.audited_by||'—'}</td>
+      <td>${assetCell}</td>
+      <td>${changesCell}</td>
+      <td style="font-size:10px;color:var(--text3);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${locationCell.replace(/<[^>]+>/g,'')}">${locationCell}</td>
+    </tr>`;
+  }).join('');
+}
+
+function clearActivityFilters(){
+  ['ah-f-user','ah-f-action','ah-f-from','ah-f-to'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.value='';
+  });
+  renderActivityTable();
+}
+
+function exportActivityCSV(){
+  const data=activityFiltered.length?activityFiltered:getActivityFiltered();
+  if(!data.length){toast('No data to export','err');return;}
+  const _fmtDT2=d=>{
+    if(!d)return'';
+    try{
+      const dt=new Date(d);
+      return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})
+        +' '+dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    }catch(e){return String(d);}
+  };
+  const h=['Date & Time','Action','Officer','Barcode','Asset ID','Changes','Location / Notes'];
+  const rows=data.map(l=>{
+    let loc='';
+    if(l.action==='LOGIN'&&l.changes){
+      try{const g=JSON.parse(l.changes);loc=g.location||g.lat+','+g.lng||'';}catch(e){loc=l.notes||'';}
+    } else {loc=l.notes||'';}
+    return [_fmtDT2(l.audited_at),l.action||'',l.audited_by||'',l.barcode||'',l.asset_id||'',l.changes||'',loc]
+      .map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',');
+  });
+  const ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,16);
+  dlFile('\uFEFF'+[h.join(','),...rows].join('\n'),'text/csv;charset=utf-8;',`ActivityHistory_${ts}.csv`);
+  toast('Activity history exported','ok');
 }
 
 // ══════════════════════════════════════════════════════
