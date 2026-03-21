@@ -942,6 +942,10 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
             <div class="card-ttl" style="margin:0;">Google Sheets — Fixed Asset Register</div>
             <div style="font-size:11px;color:var(--text3);">Two-way sync via Google Apps Script Web App</div>
           </div>
+          <div style="margin-left:auto;text-align:right;">
+            <div style="font-size:9px;color:var(--text3);letter-spacing:.5px;text-transform:uppercase;margin-bottom:3px;">Active Workspace</div>
+            <div style="font-family:var(--fh);font-size:12px;font-weight:900;color:var(--acc);background:rgba(0,119,204,.1);padding:3px 10px;border-radius:6px;" id="gs-workspace-badge">—</div>
+          </div>
         </div>
 
         <!-- Step 1: Deploy script -->
@@ -990,9 +994,9 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
         <div class="setup-sect" style="margin-bottom:14px;">
           <div class="setup-hdr"><div class="setup-hdr-ttl">Step 3 — Map your sheet columns to AssetTrack fields</div></div>
           <div class="setup-body">
-            <div style="font-size:11px;color:var(--text2);margin-bottom:12px;">Enter the exact column header from your sheet for each AssetTrack field. Leave blank to skip that field.</div>
+            <div style="font-size:11px;color:var(--text2);margin-bottom:12px;">Enter the exact column header from your Google Sheet for each field below.</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-              <div class="fg"><div class="fl">Barcode / Asset Code <span class="req">REQUIRED</span></div><input class="fi" id="gs-col-barcode" placeholder="Asset Code"></div>
+              <div class="fg"><div class="fl">🔑 Barcode / Asset Code <span class="req">PIVOT KEY</span></div><input class="fi" id="gs-col-barcode" placeholder="Asset Code"></div>
               <div class="fg"><div class="fl">Asset Name / Description</div><input class="fi" id="gs-col-name" placeholder="Description"></div>
               <div class="fg"><div class="fl">Category</div><input class="fi" id="gs-col-cat" placeholder="Category"></div>
               <div class="fg"><div class="fl">Location</div><input class="fi" id="gs-col-loc" placeholder="Location"></div>
@@ -1001,6 +1005,43 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
               <div class="fg"><div class="fl">Serial Number</div><input class="fi" id="gs-col-serial" placeholder="Serial No."></div>
               <div class="fg"><div class="fl">Status</div><input class="fi" id="gs-col-status" placeholder="Status"></div>
               <div class="fg"><div class="fl">Condition</div><input class="fi" id="gs-col-cond" placeholder="Condition"></div>
+              <div class="fg"><div class="fl">Last Audit Date</div><input class="fi" id="gs-col-auditdate" placeholder="Last Audit Date"></div>
+              <div class="fg"><div class="fl">Last Audited By</div><input class="fi" id="gs-col-auditby" placeholder="Audited By"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 4: Update Field Control -->
+        <div class="setup-sect" style="margin-bottom:14px;">
+          <div class="setup-hdr"><div class="setup-hdr-ttl">Step 4 — Which fields update existing FAR rows on Push?</div></div>
+          <div class="setup-body">
+            <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.7;">
+              The <strong style="color:var(--acc);">Barcode</strong> is always the pivot key — it identifies which row to update.
+              Fields marked <strong style="color:var(--acc4);">✓ Update</strong> will overwrite the existing FAR value on push.
+              Fields marked <strong style="color:var(--text3);">— Lock</strong> are write-once — only written when a row is first created, never overwritten (protects finance data like Net Book Value).
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;" id="gs-update-fields">
+              <!-- rendered by renderUpdateFieldToggles() -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 5: New Asset Handling -->
+        <div class="setup-sect" style="margin-bottom:14px;">
+          <div class="setup-hdr"><div class="setup-hdr-ttl">Step 5 — New assets not in FAR</div></div>
+          <div class="setup-body">
+            <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.7;">
+              When AssetTrack has assets that don't exist in the sheet (registered in the field but not yet in FAR), what should happen on Push?
+            </div>
+            <select class="fi" id="gs-new-asset-action" style="margin-bottom:10px;">
+              <option value="append">Append as new row — add to FAR automatically</option>
+              <option value="flag">Flag only — log in sync report, do not write to sheet</option>
+              <option value="skip">Skip — ignore assets not already in FAR</option>
+            </select>
+            <div style="font-size:11px;color:var(--text3);line-height:1.7;">
+              <strong style="color:var(--acc2);">Append</strong> — good for live deployments where field data should flow directly into the FAR.<br>
+              <strong style="color:var(--acc2);">Flag only</strong> — good for controlled FAR environments where finance must approve new additions.<br>
+              <strong style="color:var(--acc2);">Skip</strong> — good for audit-only mode where the FAR is master and AssetTrack only updates existing records.
             </div>
           </div>
         </div>
@@ -1008,10 +1049,11 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
         <!-- Actions -->
         <div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:12px;">
           <button class="act-btn btn-p" onclick="testSheetsConnection()">🔌 Test Connection</button>
-          <button class="act-btn btn-g" onclick="pushToSheets()">⬆ Push Assets → Sheets</button>
+          <button class="act-btn btn-g" onclick="pushToSheets()">⬆ Push → Sheets</button>
+          <button class="act-btn btn-g" style="background:var(--g-teal);" onclick="pushAuditResultsToSheets()">📋 Push Audit Results</button>
           <button class="act-btn btn-s" onclick="pullFromSheets()">⬇ Pull FAR → AssetTrack</button>
           <button class="act-btn btn-s" onclick="saveSheetsConfig()">💾 Save Config</button>
-          <button class="act-btn btn-d" onclick="resetSheetsSync()">↺ Reset Sync Status</button>
+          <button class="act-btn btn-d" onclick="resetSheetsSync()">↺ Reset</button>
         </div>
 
         <!-- Sync log -->
@@ -1513,7 +1555,7 @@ async function switchWorkspace(companyId){
   if(!companyId)return;
   activeCompanyId=companyId;
   activeCompany=allCompanies.find(c=>c.id===companyId)||null;
-  // Reload config for this company
+  // Reload config for this company (includes sheets_config)
   await loadCompanyConfig(companyId);
   loadCustomFields();
   // Reload assets for this company
@@ -1525,6 +1567,15 @@ async function switchWorkspace(companyId){
   // Update UI badge
   const badge=document.getElementById('active-co-badge');
   if(badge)badge.textContent=activeCompany?activeCompany.name:'—';
+  // Update Google Sheets workspace badge if ERP panel is showing
+  const wsEl=document.getElementById('gs-workspace-badge');
+  if(wsEl)wsEl.textContent=activeCompany?activeCompany.name:'—';
+  // If ERP/sheets config panel is open, reload it for the new company
+  const sheetsOpen=document.getElementById('erp-cfg-sheets');
+  if(sheetsOpen&&sheetsOpen.classList.contains('show')){
+    loadSheetsConfig();
+    gsLog(`Workspace switched to: ${activeCompany?activeCompany.name:companyId} — config reloaded`,'var(--acc2)');
+  }
   toast('Workspace: '+(activeCompany?activeCompany.name:'All'),'info');
   // Re-render current panel
   const onPanel=document.querySelector('.panel.on');
@@ -1549,6 +1600,12 @@ async function loadCompanyConfig(companyId){
           if(r.key==='status_options'&&Array.isArray(parsed))STATUS_OPTIONS=parsed;
           if(r.key==='condition_options'&&Array.isArray(parsed))CONDITION_OPTIONS=parsed;
           if(r.key==='custom_fields'&&Array.isArray(parsed))CUSTOM_FIELDS=parsed;
+          if(r.key==='sheets_config'&&typeof parsed==='object'){
+            gsSheetsConfig=parsed;
+            // Update ERP status badge if visible
+            const badge=document.getElementById('erp-st-sheets');
+            if(badge)badge.textContent=parsed.url?'✓ Configured':'Not connected';
+          }
         });
         return;
       }
@@ -1567,6 +1624,13 @@ async function loadCompanyConfig(companyId){
   DEPARTMENTS=d?JSON.parse(d):['Management','Finance','Operations','IT','HR','Procurement'];
   if(so)try{STATUS_OPTIONS=JSON.parse(so);}catch(e){}
   if(co2)try{CONDITION_OPTIONS=JSON.parse(co2);}catch(e){}
+  // Load sheets config from localStorage (keyed by company)
+  const sc=localStorage.getItem('atp_sheets_cfg_'+companyId);
+  if(sc)try{
+    gsSheetsConfig=JSON.parse(sc);
+    const badge=document.getElementById('erp-st-sheets');
+    if(badge)badge.textContent=gsSheetsConfig.url?'✓ Configured':'Not connected';
+  }catch(e){}
 }
 
 async function saveCompanyConfig(companyId, key, value){
@@ -3513,6 +3577,9 @@ function selErp(id){
   document.getElementById('erp-cfg-sheets').classList.remove('show');
   if(id==='sheets'){
     document.getElementById('erp-cfg-sheets').classList.add('show');
+    // Show which company this config belongs to
+    const wsEl=document.getElementById('gs-workspace-badge');
+    if(wsEl)wsEl.textContent=activeCompany?activeCompany.name:'No workspace selected';
     loadSheetsConfig();
     renderSheetsScriptBlock();
   } else {
@@ -3620,6 +3687,69 @@ function doPost(e) {
       return respond({ ok: true, pushed: pushed, updated: updated });
     }
 
+    // push_audit: update only specific fields in existing rows, flag missing ones
+    if (payload.action === 'push_audit' && Array.isArray(payload.assets)) {
+      var colMap   = payload.colMap || {};
+      var pivotCol = colMap.barcode || 'Asset Code';
+      var lastRow  = sheet.getLastRow();
+      if (lastRow < 2) return respond({ updated: 0, not_found: payload.assets.map(function(a){return a.barcode;}) });
+
+      var lastCol  = sheet.getLastColumn();
+      var headers  = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+      var pivotIdx = headers.indexOf(pivotCol);
+      if (pivotIdx < 0) return respond({ error: 'Pivot column "' + pivotCol + '" not found in sheet. Check your Barcode column mapping.' });
+
+      // Read all barcodes from sheet for fast lookup
+      var allBarcodes = sheet.getRange(2, pivotIdx + 1, lastRow - 1, 1).getValues();
+      var updated = 0;
+      var notFound = [];
+
+      payload.assets.forEach(function(asset) {
+        var bc = String(asset.barcode || '').trim();
+        if (!bc) return;
+        var rowIdx = -1;
+        for (var i = 0; i < allBarcodes.length; i++) {
+          if (String(allBarcodes[i][0]).trim() === bc) { rowIdx = i; break; }
+        }
+        if (rowIdx < 0) { notFound.push(bc); return; }
+
+        var rowNum = rowIdx + 2;  // +1 for header, +1 for 1-index
+        // Build field map from colMap
+        var fieldMap = {
+          'Location'       : asset.location        || null,
+          'Department'     : asset.department       || null,
+          'Custodian'      : asset.custodian        || null,
+          'Status'         : asset.status           || null,
+          'Condition'      : asset.condition        || null,
+          'Last Audit Date': asset.last_audit_date ? new Date(asset.last_audit_date).toLocaleDateString('en-GB') : null,
+          'Audited By'     : asset.last_audit_by    || null,
+          'Asset Name'     : asset.name             || null,
+          'Category'       : asset.category         || null,
+          'Serial No.'     : asset.serial           || null,
+        };
+        // Also support custom column names from colMap
+        var customMap = {};
+        if (colMap.loc)       customMap[colMap.loc]       = asset.location;
+        if (colMap.dept)      customMap[colMap.dept]      = asset.department;
+        if (colMap.cust)      customMap[colMap.cust]      = asset.custodian;
+        if (colMap.status)    customMap[colMap.status]    = asset.status;
+        if (colMap.cond)      customMap[colMap.cond]      = asset.condition;
+        if (colMap.auditdate) customMap[colMap.auditdate] = asset.last_audit_date ? new Date(asset.last_audit_date).toLocaleDateString('en-GB') : null;
+        if (colMap.auditby)   customMap[colMap.auditby]   = asset.last_audit_by;
+
+        // Write each mapped field individually (only update, never insert new columns)
+        headers.forEach(function(h, colI) {
+          var val = customMap[h] !== undefined ? customMap[h] : (fieldMap[h] !== undefined ? fieldMap[h] : undefined);
+          if (val !== undefined && val !== null) {
+            sheet.getRange(rowNum, colI + 1).setValue(val);
+          }
+        });
+        updated++;
+      });
+
+      return respond({ ok: true, updated: updated, not_found: notFound });
+    }
+
     return respond({ error: 'Unknown action: ' + payload.action });
   } catch (err) {
     return respond({ error: err.message });
@@ -3675,22 +3805,69 @@ function copySheetScript(){
   toast('✅ Apps Script code copied — paste into Extensions → Apps Script','ok');
 }
 
-function loadSheetsConfig(){
-  const cfg=JSON.parse(localStorage.getItem('atp_erp_sheets')||'{}');
-  if(cfg.url)document.getElementById('gs-url').value=cfg.url||'';
-  if(cfg.sheet)document.getElementById('gs-sheet').value=cfg.sheet||'Sheet1';
-  if(cfg.dir)document.getElementById('gs-dir').value=cfg.dir||'both';
-  // Column mapping
+// GS config variable — holds the active company's sheets config
+let gsSheetsConfig={};
+
+async function loadSheetsConfig(){
+  // Priority: Supabase (per company) → localStorage (per company) → global localStorage fallback
+  const companyId=activeCompanyId||'global';
+  let cfg={};
+
+  if(CONFIGURED&&activeCompanyId){
+    try{
+      const res=await sb.query('config',`?company_id=eq.${activeCompanyId}&key=eq.sheets_config&select=value`);
+      if(Array.isArray(res)&&res.length&&res[0].value){
+        try{
+          const parsed=JSON.parse(res[0].value);
+          cfg=typeof parsed==='string'?JSON.parse(parsed):parsed;
+          gsLog(`Config loaded from cloud for: ${activeCompany?activeCompany.name:activeCompanyId}`,'var(--acc4)');
+        }catch(e){}
+      }
+    }catch(e){}
+  }
+
+  // Fallback: localStorage keyed by company
+  if(!cfg.url){
+    const local=localStorage.getItem('atp_sheets_cfg_'+companyId);
+    if(local)try{cfg=JSON.parse(local);}catch(e){}
+  }
+
+  // Final fallback: old global key (migration path)
+  if(!cfg.url){
+    const old=localStorage.getItem('atp_erp_sheets');
+    if(old)try{cfg=JSON.parse(old);}catch(e){}
+  }
+
+  gsSheetsConfig=cfg;
+
+  // Populate form fields
+  const set=(id,val)=>{const el=document.getElementById(id);if(el)el.value=val||'';};
+  set('gs-url',cfg.url||'');
+  set('gs-sheet',cfg.sheet||'Sheet1');
+  const dirEl=document.getElementById('gs-dir');if(dirEl)dirEl.value=cfg.dir||'both';
   const cols={barcode:'Asset Code',name:'Description',cat:'Category',loc:'Location',
-    dept:'Department',cust:'Custodian',serial:'Serial No.',status:'Status',cond:'Condition'};
-  Object.entries(cols).forEach(([k,def])=>{
-    const el=document.getElementById('gs-col-'+k);
-    if(el)el.value=cfg['col_'+k]||def;
-  });
+    dept:'Department',cust:'Custodian',serial:'Serial No.',status:'Status',cond:'Condition',
+    auditdate:'Last Audit Date',auditby:'Audited By'};
+  Object.entries(cols).forEach(([k,def])=>set('gs-col-'+k,cfg['col_'+k]||def));
+  // New asset action
+  const naEl=document.getElementById('gs-new-asset-action');
+  if(naEl&&cfg.new_asset_action)naEl.value=cfg.new_asset_action;
   gsSyncStatus=cfg.syncStatus||{};
+  // Render update field toggles with saved state
+  renderUpdateFieldToggles(cfg.update_fields||null);
+  // Update status badge
+  const badge=document.getElementById('erp-st-sheets');
+  if(badge)badge.textContent=cfg.url?'✓ Configured':'Not connected';
+  // Company badge
+  const cbadge=document.getElementById('gs-company-badge');
+  if(cbadge){
+    const coName=activeCompany?activeCompany.name:'this workspace';
+    cbadge.textContent=cfg.url?`✓ Sheet configured for: ${coName}`:`No sheet configured for: ${coName}`;
+    cbadge.style.color=cfg.url?'var(--acc4)':'var(--acc2)';
+  }
 }
 
-function saveSheetsConfig(){
+async function saveSheetsConfig(){
   const cfg={
     url:document.getElementById('gs-url').value.trim(),
     sheet:document.getElementById('gs-sheet').value.trim()||'Sheet1',
@@ -3704,12 +3881,37 @@ function saveSheetsConfig(){
     col_serial:document.getElementById('gs-col-serial').value.trim(),
     col_status:document.getElementById('gs-col-status').value.trim(),
     col_cond:document.getElementById('gs-col-cond').value.trim(),
-    syncStatus:gsSyncStatus
+    col_auditdate:(document.getElementById('gs-col-auditdate')||{}).value?.trim()||'Last Audit Date',
+    col_auditby:(document.getElementById('gs-col-auditby')||{}).value?.trim()||'Audited By',
+    new_asset_action:(document.getElementById('gs-new-asset-action')||{}).value||'append',
+    update_fields:getUpdateFieldState(),
+    syncStatus:gsSyncStatus,
+    savedAt:new Date().toISOString(),
+    companyId:activeCompanyId||'global',
+    companyName:activeCompany?activeCompany.name:'Global'
   };
   if(!cfg.url){toast('Enter the Web App URL first','err');return;}
-  localStorage.setItem('atp_erp_sheets',JSON.stringify(cfg));
-  document.getElementById('erp-st-sheets').textContent='Configured';
-  toast('✅ Google Sheets config saved','ok');
+
+  // Save to Supabase (per company) — available on any device
+  if(CONFIGURED&&activeCompanyId){
+    try{
+      await saveCompanyConfig(activeCompanyId,'sheets_config',cfg);
+      gsLog(`✓ Config saved to cloud for: ${activeCompany?activeCompany.name:activeCompanyId}`,'var(--acc4)');
+    }catch(e){
+      gsLog('⚠ Cloud save failed — saved locally only: '+e.message,'var(--acc2)');
+    }
+  }
+
+  // Always mirror to localStorage (offline fallback, keyed by company)
+  const companyId=activeCompanyId||'global';
+  localStorage.setItem('atp_sheets_cfg_'+companyId,JSON.stringify(cfg));
+
+  gsSheetsConfig=cfg;
+  const badge=document.getElementById('erp-st-sheets');
+  if(badge)badge.textContent='✓ Configured';
+
+  const coName=activeCompany?` for ${activeCompany.name}`:'';
+  toast(`✅ Google Sheets config saved${coName}`,'ok');
 }
 
 function gsLog(msg,color='var(--text2)'){
@@ -3723,17 +3925,121 @@ function gsLog(msg,color='var(--text2)'){
 
 function getGsUrl(){return (document.getElementById('gs-url')||{}).value?.trim()||'';}
 function getGsColMap(){
+  const g=id=>(document.getElementById(id)||{}).value?.trim()||'';
   return {
-    barcode:document.getElementById('gs-col-barcode').value.trim()||'Asset Code',
-    name:document.getElementById('gs-col-name').value.trim()||'Description',
-    cat:document.getElementById('gs-col-cat').value.trim()||'Category',
-    loc:document.getElementById('gs-col-loc').value.trim()||'Location',
-    dept:document.getElementById('gs-col-dept').value.trim()||'Department',
-    cust:document.getElementById('gs-col-cust').value.trim()||'Custodian',
-    serial:document.getElementById('gs-col-serial').value.trim()||'Serial No.',
-    status:document.getElementById('gs-col-status').value.trim()||'Status',
-    cond:document.getElementById('gs-col-cond').value.trim()||'Condition',
+    barcode:g('gs-col-barcode')||'Asset Code',
+    name:g('gs-col-name')||'Description',
+    cat:g('gs-col-cat')||'Category',
+    loc:g('gs-col-loc')||'Location',
+    dept:g('gs-col-dept')||'Department',
+    cust:g('gs-col-cust')||'Custodian',
+    serial:g('gs-col-serial')||'Serial No.',
+    status:g('gs-col-status')||'Status',
+    cond:g('gs-col-cond')||'Condition',
+    auditdate:g('gs-col-auditdate')||'Last Audit Date',
+    auditby:g('gs-col-auditby')||'Audited By',
   };
+}
+
+// ── Update field toggle definitions ─────────────────────
+const GS_UPDATABLE_FIELDS=[
+  {key:'name',     label:'Asset Name',     default:false},
+  {key:'cat',      label:'Category',       default:false},
+  {key:'loc',      label:'Location',       default:true},
+  {key:'dept',     label:'Department',     default:true},
+  {key:'cust',     label:'Custodian',      default:true},
+  {key:'serial',   label:'Serial Number',  default:false},
+  {key:'status',   label:'Status',         default:true},
+  {key:'cond',     label:'Condition',      default:true},
+  {key:'auditdate',label:'Last Audit Date',default:true},
+  {key:'auditby',  label:'Audited By',     default:true},
+];
+
+function renderUpdateFieldToggles(savedState){
+  const el=document.getElementById('gs-update-fields');
+  if(!el)return;
+  el.innerHTML=GS_UPDATABLE_FIELDS.map(f=>{
+    const on=savedState?savedState[f.key]!==false:f.default;
+    return `<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+      background:var(--surf2);border:2px solid ${on?'var(--acc4)':'var(--border)'};
+      border-radius:8px;cursor:pointer;" id="gs-uf-wrap-${f.key}">
+      <input type="checkbox" id="gs-uf-${f.key}" ${on?'checked':''} style="accent-color:var(--acc4);width:14px;height:14px;"
+        onchange="onUFChange('${f.key}',this.checked)">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--text);">${f.label}</div>
+        <div style="font-size:9px;color:var(--text3);" id="gs-uf-lbl-${f.key}">${on?'✓ Update on push':'— Locked'}</div>
+      </div></label>`;
+  }).join('');
+}
+
+function onUFChange(key,checked){
+  const wrap=document.getElementById('gs-uf-wrap-'+key);
+  const lbl=document.getElementById('gs-uf-lbl-'+key);
+  if(wrap)wrap.style.borderColor=checked?'var(--acc4)':'var(--border)';
+  if(lbl)lbl.textContent=checked?'✓ Update on push':'— Locked';
+}
+
+function getUpdateFieldState(){
+  const state={};
+  GS_UPDATABLE_FIELDS.forEach(f=>{
+    const el=document.getElementById('gs-uf-'+f.key);
+    state[f.key]=el?el.checked:f.default;
+  });
+  return state;
+}
+
+// ── Push Audit Results only (selective fields push) ──────
+async function pushAuditResultsToSheets(){
+  const url=getGsUrl();
+  if(!url){toast('Enter the Web App URL first','err');return;}
+  const auditedAssets=(activeCompanyId?allAssets.filter(a=>a.company_id===activeCompanyId):allAssets)
+    .filter(a=>a.last_audit_date);
+  if(!auditedAssets.length){toast('No audited assets to push','err');return;}
+  const updateFields=getUpdateFieldState();
+  const colMap=getGsColMap();
+  gsLog(`Pushing audit results for ${auditedAssets.length} audited asset${auditedAssets.length!==1?'s':''} — only updating allowed fields…`);
+  // Build selective payload: only include fields marked as updateable
+  const selective=auditedAssets.map(a=>{
+    const payload={barcode:a.barcode, _updateOnly:true};
+    if(updateFields.loc)       payload.location       = a.location||'';
+    if(updateFields.dept)      payload.department     = a.department||'';
+    if(updateFields.cust)      payload.custodian      = a.custodian||'';
+    if(updateFields.status)    payload.status         = a.status||'';
+    if(updateFields.cond)      payload.condition      = a.condition||'';
+    if(updateFields.auditdate) payload.last_audit_date= a.last_audit_date||'';
+    if(updateFields.auditby)   payload.last_audit_by  = a.last_audit_by||'';
+    if(updateFields.name)      payload.name           = a.name||'';
+    if(updateFields.cat)       payload.category       = a.category||'';
+    if(updateFields.serial)    payload.serial         = a.serial||'';
+    return payload;
+  });
+  try{
+    const res=await fetch(url,{method:'POST',redirect:'follow',
+      body:JSON.stringify({action:'push_audit',assets:selective,colMap})
+    });
+    if(!res.ok){gsLog('✗ HTTP '+res.status,'var(--acc3)');return;}
+    const text=await res.text();
+    let data;
+    try{data=JSON.parse(text);}catch(e){gsLog('✗ Unexpected response: '+text.slice(0,100),'var(--acc3)');return;}
+    if(data.error){gsLog('✗ '+data.error,'var(--acc3)');return;}
+    const flagged=data.not_found||[];
+    gsLog(`✓ Audit push complete — ${data.updated||0} rows updated`,'var(--acc)');
+    if(flagged.length){
+      gsLog(`⚠ ${flagged.length} asset${flagged.length!==1?'s':''} not found in FAR (not in sheet): ${flagged.slice(0,5).join(', ')}${flagged.length>5?'…':''}`,
+        'var(--acc2)');
+      toast(`⚠ ${flagged.length} assets not in FAR — see sync log`,'warn');
+    } else {
+      toast(`✅ Audit results pushed — ${data.updated||0} FAR rows updated`,'ok');
+    }
+    const ts=new Date().toISOString();
+    auditedAssets.forEach(a=>{gsSyncStatus[a.barcode]={status:'Audit Pushed',ts};});
+    saveSheetsConfig();
+    renderGsSyncStatus(auditedAssets);
+    document.getElementById('erp-st-sheets').textContent='✓ Audit Synced';
+  }catch(e){
+    gsLog('✗ Audit push failed: '+e.message,'var(--acc3)');
+    toast('Audit push failed — see sync log','err');
+  }
 }
 
 async function testSheetsConnection(){
