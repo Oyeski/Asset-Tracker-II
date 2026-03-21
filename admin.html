@@ -3527,111 +3527,139 @@ function selErp(id){
 // GOOGLE SHEETS FAR SYNC
 // ══════════════════════════════════════════════════════
 const GS_SCRIPT_CODE=`// ═══════════════════════════════════════════════════════════
-// AssetTrack Pro — Google Sheets FAR Sync Script
-// Paste this into Extensions → Apps Script, then Deploy as Web App
-// Execute as: Me | Access: Anyone
+// AssetTrack Pro — Google Sheets FAR Sync Script v2
+// Paste into Extensions → Apps Script → Deploy as Web App
+// Execute as: Me | Who has access: Anyone
 // ═══════════════════════════════════════════════════════════
 
-const SHEET_NAME = 'Sheet1'; // Change to your tab name if different
+const SHEET_NAME = 'Sheet1'; // ← Change to your exact tab name
 
+const STD_HEADERS = [
+  'Asset Code','Asset Name','Category','Sub-Category',
+  'Location','Department','Status','Condition',
+  'Custodian','Serial No.','Registered By',
+  'Date Registered','Last Audit Date','Notes','AssetTrack ID'
+];
+
+// ── GET: test connection or pull records ──────────────────
 function doGet(e) {
-  // PULL: AssetTrack calls GET to fetch all FAR rows
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
-    const data = sheet.getDataRange().getValues();
-    if (data.length < 2) return jsonResponse({ rows: [], headers: [] });
-    const headers = data[0].map(String);
-    const rows = data.slice(1).map(row =>
-      Object.fromEntries(headers.map((h, i) => [h, String(row[i] || '')]))
-    );
-    return jsonResponse({ rows, headers, total: rows.length });
-  } catch(err) {
-    return jsonResponse({ error: err.message });
+  const action = (e && e.parameter && e.parameter.action) || 'pull';
+  const sheet  = getSheet();
+
+  if (action === 'test') {
+    const lastCol = Math.max(sheet.getLastColumn(), 1);
+    const headers = sheet.getLastRow() > 0
+      ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String)
+      : [];
+    return respond({ ok: true, sheet: sheet.getName(),
+      columns: headers, rows: Math.max(sheet.getLastRow() - 1, 0) });
   }
+
+  // pull: return all data rows as array of objects
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return respond({ rows: [], headers: [], total: 0 });
+  const lastCol = sheet.getLastColumn();
+  const raw     = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  const headers = raw[0].map(String);
+  const rows    = raw.slice(1).map(row =>
+    Object.fromEntries(headers.map((h, i) => [h, String(row[i] == null ? '' : row[i])]))
+  );
+  return respond({ rows, headers, total: rows.length });
 }
 
+// ── POST: push assets from AssetTrack into the sheet ──────
 function doPost(e) {
-  // PUSH: AssetTrack sends assets as JSON array
   try {
-    const payload = JSON.parse(e.postData.contents);
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
+    const body    = e.postData ? e.postData.contents : '{}';
+    const payload = JSON.parse(body);
+    const sheet   = getSheet();
 
     if (payload.action === 'test') {
-      const headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
-      return jsonResponse({ ok: true, sheet: sheet.getName(), columns: headers, rows: sheet.getLastRow()-1 });
+      const lastCol = Math.max(sheet.getLastColumn(), 1);
+      const headers = sheet.getLastRow() > 0
+        ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String) : [];
+      return respond({ ok: true, sheet: sheet.getName(),
+        columns: headers, rows: Math.max(sheet.getLastRow() - 1, 0) });
     }
 
     if (payload.action === 'push' && Array.isArray(payload.assets)) {
-      const headers = sheet.getLastRow() > 0
-        ? sheet.getRange(1,1,1,Math.max(sheet.getLastColumn(),1)).getValues()[0].map(String)
-        : [];
-
-      // Build header row if sheet is empty
-      const stdHeaders = ['Asset Code','Asset Name','Category','Sub-Category',
-        'Location','Department','Status','Condition','Custodian','Serial No.',
-        'Registered By','Date Registered','Last Audit Date','Notes','AssetTrack ID'];
-      if (headers.length === 0 || (headers.length === 1 && !headers[0])) {
-        sheet.getRange(1,1,1,stdHeaders.length).setValues([stdHeaders]);
-        sheet.getRange(1,1,1,stdHeaders.length).setFontWeight('bold')
-          .setBackground('#1e8449').setFontColor('#ffffff');
+      // Ensure header row exists
+      let colHeaders;
+      if (sheet.getLastRow() === 0 || sheet.getLastColumn() === 0) {
+        sheet.getRange(1, 1, 1, STD_HEADERS.length).setValues([STD_HEADERS]);
+        sheet.getRange(1, 1, 1, STD_HEADERS.length)
+          .setFontWeight('bold').setBackground('#1e8449').setFontColor('#ffffff');
+        colHeaders = STD_HEADERS;
+      } else {
+        colHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn())
+          .getValues()[0].map(String);
       }
 
-      const colHeaders = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0].map(String);
       let pushed = 0, updated = 0;
+      const codeCol = colHeaders.indexOf('Asset Code');
 
-      payload.assets.forEach(asset => {
-        // Find existing row by Asset Code (barcode)
-        const col = colHeaders.indexOf('Asset Code') + 1;
-        if (col > 0) {
-          const colData = sheet.getRange(2, col, Math.max(sheet.getLastRow()-1,1), 1).getValues();
-          const existIdx = colData.findIndex(r => String(r[0]) === String(asset.barcode||''));
-          if (existIdx >= 0) {
-            // Update existing row
-            const rowNum = existIdx + 2;
-            writeAssetRow(sheet, colHeaders, rowNum, asset);
+      payload.assets.forEach(function(asset) {
+        const row = buildRow(colHeaders, asset);
+        // Check if barcode already exists in sheet
+        if (codeCol >= 0 && sheet.getLastRow() > 1) {
+          const existing = sheet.getRange(2, codeCol + 1,
+            sheet.getLastRow() - 1, 1).getValues();
+          const idx = existing.findIndex(function(r) {
+            return String(r[0]) === String(asset.barcode || '');
+          });
+          if (idx >= 0) {
+            sheet.getRange(idx + 2, 1, 1, row.length).setValues([row]);
             updated++;
             return;
           }
         }
-        // Append new row
-        const newRow = buildRow(colHeaders, asset);
-        sheet.appendRow(newRow);
+        sheet.appendRow(row);
         pushed++;
       });
 
-      return jsonResponse({ ok: true, pushed, updated, total: pushed + updated });
+      return respond({ ok: true, pushed: pushed, updated: updated });
     }
 
-    return jsonResponse({ error: 'Unknown action' });
-  } catch(err) {
-    return jsonResponse({ error: err.message });
+    return respond({ error: 'Unknown action: ' + payload.action });
+  } catch (err) {
+    return respond({ error: err.message });
   }
 }
 
+// ── Helpers ───────────────────────────────────────────────
+function getSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  return ss.getSheetByName(SHEET_NAME) || ss.getSheets()[0];
+}
+
 function buildRow(headers, asset) {
-  const map = {
-    'Asset Code': asset.barcode, 'Asset Name': asset.name,
-    'Category': asset.category, 'Sub-Category': asset.sub_category,
-    'Location': asset.location, 'Department': asset.department,
-    'Status': asset.status, 'Condition': asset.condition,
-    'Custodian': asset.custodian, 'Serial No.': asset.serial,
-    'Registered By': asset.registered_by,
-    'Date Registered': asset.created_at ? new Date(asset.created_at).toLocaleDateString() : '',
-    'Last Audit Date': asset.last_audit_date ? new Date(asset.last_audit_date).toLocaleDateString() : '',
-    'Notes': asset.notes, 'AssetTrack ID': asset.id
+  var fmt = function(d) {
+    if (!d) return '';
+    try { return new Date(d).toLocaleDateString('en-GB'); } catch(e) { return String(d); }
   };
-  return headers.map(h => map[h] !== undefined ? (map[h] || '') : '');
+  var map = {
+    'Asset Code'     : asset.barcode       || '',
+    'Asset Name'     : asset.name          || '',
+    'Category'       : asset.category      || '',
+    'Sub-Category'   : asset.sub_category  || '',
+    'Location'       : asset.location      || '',
+    'Department'     : asset.department    || '',
+    'Status'         : asset.status        || '',
+    'Condition'      : asset.condition     || '',
+    'Custodian'      : asset.custodian     || '',
+    'Serial No.'     : asset.serial        || '',
+    'Registered By'  : asset.registered_by || '',
+    'Date Registered': fmt(asset.created_at),
+    'Last Audit Date': fmt(asset.last_audit_date),
+    'Notes'          : asset.notes         || '',
+    'AssetTrack ID'  : asset.id            || ''
+  };
+  return headers.map(function(h) { return map[h] !== undefined ? map[h] : ''; });
 }
 
-function writeAssetRow(sheet, headers, rowNum, asset) {
-  const row = buildRow(headers, asset);
-  sheet.getRange(rowNum, 1, 1, row.length).setValues([row]);
-}
-
-function jsonResponse(data) {
-  return ContentService.createTextOutput(JSON.stringify(data))
+function respond(data) {
+  return ContentService
+    .createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
 }`;
 
@@ -3713,18 +3741,18 @@ async function testSheetsConnection(){
   if(!url){toast('Enter the Web App URL first','err');return;}
   gsLog('Testing connection to Google Sheets…');
   try{
-    const res=await fetch(url,{method:'POST',
-      headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'test'})
-    });
-    if(!res.ok){gsLog('✗ HTTP '+res.status+' — check the Web App URL','var(--acc3)');return;}
-    const data=await res.json();
+    const res=await fetch(url+'?action=test',{method:'GET',redirect:'follow'});
+    if(!res.ok){gsLog('✗ HTTP '+res.status+' — re-deploy the Web App with access set to Anyone','var(--acc3)');return;}
+    const text=await res.text();
+    let data;
+    try{data=JSON.parse(text);}catch(e){gsLog('✗ Response not JSON — is the Web App URL correct? Got: '+text.slice(0,100),'var(--acc3)');return;}
     if(data.error){gsLog('✗ Script error: '+data.error,'var(--acc3)');return;}
-    gsLog(`✓ Connected to sheet: "${data.sheet}" · ${data.rows} existing rows · Columns: ${(data.columns||[]).join(', ')}`,`var(--acc)`);
+    gsLog(`✓ Connected — sheet: "${data.sheet}" · ${data.rows} existing rows`,'var(--acc)');
+    if(data.columns&&data.columns.length)gsLog('  Columns: '+data.columns.filter(Boolean).join(' | '),'var(--text2)');
     document.getElementById('erp-st-sheets').textContent='✓ Connected';
     toast('✅ Connection successful','ok');
   }catch(e){
-    gsLog('✗ Connection failed: '+e.message+' — make sure Web App is deployed with "Anyone" access','var(--acc3)');
+    gsLog('✗ '+e.message+' — check the URL and ensure Web App access is set to Anyone','var(--acc3)');
     toast('Connection failed — see sync log','err');
   }
 }
@@ -3736,22 +3764,20 @@ async function pushToSheets(){
   if(!wsAssets.length){toast('No assets to push','err');return;}
   gsLog(`Pushing ${wsAssets.length} asset${wsAssets.length!==1?'s':''} to Google Sheets…`);
   try{
-    const res=await fetch(url,{
-      method:'POST',
-      headers:{'Content-Type':'text/plain'},
+    const res=await fetch(url,{method:'POST',redirect:'follow',
       body:JSON.stringify({action:'push',assets:wsAssets})
     });
-    if(!res.ok){gsLog('✗ HTTP '+res.status,'var(--acc3)');return;}
-    const data=await res.json();
+    if(!res.ok){gsLog('✗ HTTP '+res.status+' — re-deploy the script with access Anyone','var(--acc3)');return;}
+    const text=await res.text();
+    let data;
+    try{data=JSON.parse(text);}catch(e){gsLog('✗ Unexpected response: '+text.slice(0,100),'var(--acc3)');return;}
     if(data.error){gsLog('✗ '+data.error,'var(--acc3)');return;}
-    gsLog(`✓ Push complete — ${data.pushed||0} new rows added, ${data.updated||0} rows updated`,'var(--acc)');
-    // Update sync status
+    gsLog(`✓ Push complete — ${data.pushed||0} new rows, ${data.updated||0} updated`,'var(--acc)');
     const ts=new Date().toISOString();
     wsAssets.forEach(a=>{gsSyncStatus[a.barcode]={status:'Synced',ts};});
-    saveSheetsConfig();
-    renderGsSyncStatus(wsAssets);
+    saveSheetsConfig();renderGsSyncStatus(wsAssets);
     document.getElementById('erp-st-sheets').textContent='✓ Synced';
-    toast(`✅ ${(data.pushed||0)+(data.updated||0)} assets synced to Google Sheets`,'ok');
+    toast(`✅ ${(data.pushed||0)+(data.updated||0)} assets pushed to Google Sheets`,'ok');
   }catch(e){
     gsLog('✗ Push failed: '+e.message,'var(--acc3)');
     toast('Push failed — see sync log','err');
@@ -3764,13 +3790,15 @@ async function pullFromSheets(){
   gsLog('Pulling FAR records from Google Sheets…');
   const colMap=getGsColMap();
   try{
-    const res=await fetch(url+'?action=pull');
+    const res=await fetch(url+'?action=pull',{method:'GET',redirect:'follow'});
     if(!res.ok){gsLog('✗ HTTP '+res.status,'var(--acc3)');return;}
-    const data=await res.json();
-    if(data.error){gsLog('✗ '+data.error,'var(--acc3)');return;}
+    const text=await res.text();
+    let data;
+    try{data=JSON.parse(text);}catch(e){gsLog('✗ Unexpected response: '+text.slice(0,100),'var(--acc3)');return;}
+    if(data.error){gsLog('✗ Script error: '+data.error,'var(--acc3)');return;}
     const rows=data.rows||[];
     if(!rows.length){gsLog('ℹ Sheet is empty — nothing to pull','var(--acc2)');return;}
-    gsLog(`Found ${rows.length} rows in sheet. Importing into AssetTrack…`);
+    gsLog(`Found ${rows.length} row${rows.length!==1?'s':''} — importing…`);
     let added=0,skipped=0,updated=0;
     const now=new Date().toISOString();
     rows.forEach(row=>{
@@ -3779,29 +3807,19 @@ async function pullFromSheets(){
       const existing=allAssets.find(a=>a.barcode===barcode);
       const asset={
         id:existing?existing.id:'FAR-'+Date.now()+'-'+Math.random().toString(36).slice(2,6),
-        barcode,
-        name:row[colMap.name]||row['Asset Name']||row['Description']||barcode,
-        category:row[colMap.cat]||row['Category']||'',
-        sub_category:row['Sub-Category']||'',
-        location:row[colMap.loc]||row['Location']||'',
-        department:row[colMap.dept]||row['Department']||'',
+        barcode,name:row[colMap.name]||row['Asset Name']||row['Description']||barcode,
+        category:row[colMap.cat]||row['Category']||'',sub_category:row['Sub-Category']||'',
+        location:row[colMap.loc]||row['Location']||'',department:row[colMap.dept]||row['Department']||'',
         status:row[colMap.status]||row['Status']||STATUS_OPTIONS[0]||'Active',
-        condition:row[colMap.cond]||row['Condition']||CONDITION_OPTIONS[1]||'Good',
-        custodian:row[colMap.cust]||row['Custodian']||'',
-        serial:row[colMap.serial]||row['Serial No.']||'',
-        notes:row['Notes']||'',
-        photos:[],
-        registered_by:'FAR Import',
+        condition:row[colMap.cond]||row['Condition']||CONDITION_OPTIONS[1]||CONDITION_OPTIONS[0]||'Good',
+        custodian:row[colMap.cust]||row['Custodian']||'',serial:row[colMap.serial]||row['Serial No.']||'',
+        notes:row['Notes']||'',photos:[],registered_by:'FAR Import',
         company_id:activeCompanyId||null,
         created_at:row['Date Registered']?new Date(row['Date Registered']).toISOString():now,
-        _fromSheets:true
       };
       if(existing){
-        Object.assign(existing,{
-          name:asset.name,location:asset.location,department:asset.department,
-          status:asset.status,condition:asset.condition,custodian:asset.custodian,
-          serial:asset.serial,notes:asset.notes
-        });
+        Object.assign(existing,{name:asset.name,location:asset.location,department:asset.department,
+          status:asset.status,condition:asset.condition,custodian:asset.custodian,serial:asset.serial,notes:asset.notes});
         if(CONFIGURED)sb.update('assets',existing.id,existing).catch(()=>{});
         updated++;
       } else {
@@ -3812,7 +3830,7 @@ async function pullFromSheets(){
       gsSyncStatus[barcode]={status:'Pulled',ts:now};
     });
     saveSheetsConfig();
-    gsLog(`✓ Pull complete — ${added} new assets, ${updated} updated, ${skipped} skipped (no barcode)`,'var(--acc)');
+    gsLog(`✓ Pull complete — ${added} new, ${updated} updated, ${skipped} skipped`,'var(--acc)');
     renderAssets();refreshDash();
     renderGsSyncStatus(allAssets.filter(a=>gsSyncStatus[a.barcode]));
     document.getElementById('erp-st-sheets').textContent='✓ Synced';
@@ -3822,6 +3840,7 @@ async function pullFromSheets(){
     toast('Pull failed — see sync log','err');
   }
 }
+
 
 function renderGsSyncStatus(assets){
   const wrap=document.getElementById('gs-status-wrap');
