@@ -139,6 +139,8 @@ input,select,textarea,button{font-family:var(--fb);font-weight:700;}
   line-height:1.05;margin-top:2px;letter-spacing:-.5px;}
 .dh-ttl em{color:var(--acc);font-style:normal;}
 .dh-user{font-size:12px;color:var(--text3);margin-top:4px;font-weight:600;}
+.dh-gps{font-size:10px;color:var(--text3);margin-top:3px;font-weight:600;
+  display:none;align-items:center;gap:3px;line-height:1.4;}
 /* ── KPI CARDS ── */
 .kgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px 20px 0;}
 .kpi{background:var(--surf);border:2px solid var(--border);border-radius:var(--r);
@@ -323,6 +325,12 @@ select.fi{appearance:none;cursor:pointer;}
 /* ── SCANNER ── */
 .scan-ov{position:fixed;inset:0;z-index:80;display:none;flex-direction:column;background:#000;}
 .scan-ov.open{display:flex;}
+/* ── TORCH BUTTON ── */
+.torch-btn{background:rgba(255,255,255,.12);border:2px solid rgba(255,255,255,.25);
+  border-radius:50%;width:40px;height:40px;font-size:18px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0;}
+.torch-btn.on{background:rgba(255,220,0,.25);border-color:rgba(255,220,0,.7);}
+.torch-btn:active{transform:scale(.9);}
 .so-hdr{flex-shrink:0;padding:14px 18px 12px;display:flex;align-items:center;
   justify-content:space-between;background:rgba(0,0,0,.8);}
 .so-ttl{font-family:var(--fh);font-size:17px;font-weight:900;color:#fff;}
@@ -443,6 +451,7 @@ video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
             <div class="dh-lbl">Field Operations</div>
             <div class="dh-ttl">Asset<em>Track</em></div>
             <div class="dh-user" id="dh-user">Loading…</div>
+            <div class="dh-gps" id="dh-gps">📍 <span id="dh-gps-txt">Locating…</span></div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
             <button onclick="toggleTheme()" id="theme-btn" title="Toggle light/dark" style="background:var(--surf2);border:1px solid var(--border);border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;">🌙</button>
@@ -685,7 +694,10 @@ video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
 <div class="scan-ov" id="scan-ov">
   <div class="so-hdr">
     <div class="so-ttl" id="so-ttl">Scan Barcode</div>
-    <button class="so-close" onclick="closeScanner()">✕</button>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button class="torch-btn" id="torch-btn" onclick="toggleTorch()" title="Toggle flashlight" style="display:none;">🔦</button>
+      <button class="so-close" onclick="closeScanner()">✕</button>
+    </div>
   </div>
   <div class="so-vidwrap">
     <video id="scanvid" autoplay playsinline muted></video>
@@ -836,7 +848,14 @@ let _pendingLoginUser=null; // holds user during first-login flow
 
 function captureLoginGPS(){
   const stampEl=document.getElementById('login-gps-stamp');
-  if(!navigator.geolocation){if(stampEl)stampEl.textContent='';return;}
+  const dhGps=document.getElementById('dh-gps');
+  const dhGpsTxt=document.getElementById('dh-gps-txt');
+  if(!navigator.geolocation){
+    if(stampEl)stampEl.textContent='';
+    return;
+  }
+  // Show "Locating…" on home screen immediately
+  if(dhGps){dhGps.style.display='flex';}
   navigator.geolocation.getCurrentPosition(async pos=>{
     const lat=pos.coords.latitude.toFixed(6);
     const lng=pos.coords.longitude.toFixed(6);
@@ -846,7 +865,11 @@ function captureLoginGPS(){
         {headers:{'Accept-Language':'en'}});
       if(r.ok){const geo=await r.json();if(geo.display_name)label=geo.display_name.split(',').slice(0,3).join(',').trim();}
     }catch(e){}
+    // Update login screen stamp
     if(stampEl){stampEl.textContent='📍 '+label;stampEl.style.display='flex';}
+    // Update home screen GPS div
+    if(dhGpsTxt)dhGpsTxt.textContent=label;
+    if(dhGps)dhGps.style.display='flex';
     if(currentUser&&CONFIGURED){
       try{await sb.insert('audit_log',{
         asset_id:null,company_id:currentUser.company_id||null,
@@ -857,7 +880,11 @@ function captureLoginGPS(){
         notes:'Field app login'
       });}catch(e){}
     }
-  },()=>{if(stampEl)stampEl.textContent='';},{timeout:8000,maximumAge:60000});
+  },()=>{
+    // GPS denied — hide the home screen stamp
+    if(dhGps)dhGps.style.display='none';
+    if(stampEl)stampEl.textContent='';
+  },{timeout:8000,maximumAge:60000});
 }
 
 async function commitFirstLoginPassword(){
@@ -894,6 +921,8 @@ function doLogout(){
   document.getElementById('ls-err').textContent='';
   const gpsEl=document.getElementById('login-gps-stamp');
   if(gpsEl){gpsEl.textContent='';gpsEl.style.display='none';}
+  const dhGps=document.getElementById('dh-gps');
+  if(dhGps)dhGps.style.display='none';
   document.getElementById('fcp-overlay').classList.remove('open');
 }
 
@@ -2087,7 +2116,7 @@ function spoolPrint(){window.print();}
 // ══════════════════════════════════════════════════════
 // SCANNER
 // ══════════════════════════════════════════════════════
-let scanMode='reg',scanStream=null,scanActive=false,zxingReader=null;
+let scanMode='reg',scanStream=null,scanActive=false,zxingReader=null,torchOn=false,torchSupported=false;
 
 function openScanner(mode){
   scanMode=mode;
@@ -2106,6 +2135,9 @@ function setScanStatus(t,c='rgba(255,255,255,.8)'){const el=document.getElementB
 
 async function startCam(){
   stopCam();
+  torchOn=false;torchSupported=false;
+  const torchBtn=document.getElementById('torch-btn');
+  if(torchBtn){torchBtn.style.display='none';torchBtn.classList.remove('on');}
   if(!window.isSecureContext){showCamErr('insecure');return;}
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){showCamErr('unavailable');return;}
   try{
@@ -2115,6 +2147,13 @@ async function startCam(){
     await vid.play();
     document.getElementById('scan-loader').classList.add('hidden');
     setScanStatus('ALIGN BARCODE WITHIN FRAME','rgba(0,200,160,.9)');
+    // Check torch support on the video track
+    const track=scanStream.getVideoTracks()[0];
+    if(track){
+      const caps=track.getCapabilities?track.getCapabilities():{};
+      torchSupported=!!(caps.torch);
+      if(torchSupported&&torchBtn)torchBtn.style.display='flex';
+    }
     startDecode(vid);
   }catch(err){
     if(err.name==='NotAllowedError')showCamErr('denied');
@@ -2175,9 +2214,31 @@ function applyBarcode(bc){
   toast('Barcode captured: '+bc,'ok');
 }
 
+async function toggleTorch(){
+  if(!torchSupported||!scanStream){toast('Torch not available on this device','warn');return;}
+  torchOn=!torchOn;
+  try{
+    const track=scanStream.getVideoTracks()[0];
+    await track.applyConstraints({advanced:[{torch:torchOn}]});
+    const btn=document.getElementById('torch-btn');
+    if(btn){
+      btn.classList.toggle('on',torchOn);
+      btn.title=torchOn?'Torch ON — tap to turn off':'Toggle flashlight';
+    }
+  }catch(e){
+    torchOn=!torchOn; // revert
+    toast('Could not toggle torch: '+e.message,'err');
+  }
+}
+
 function stopCam(){
   scanActive=false;
   if(zxingReader){try{zxingReader.reset();}catch(e){}zxingReader=null;}
+  // Always kill torch before stopping tracks
+  if(torchOn&&scanStream){
+    try{const t=scanStream.getVideoTracks()[0];t.applyConstraints({advanced:[{torch:false}]});}catch(e){}
+    torchOn=false;
+  }
   if(scanStream){scanStream.getTracks().forEach(t=>t.stop());scanStream=null;}
   const v=document.getElementById('scanvid');if(v)v.srcObject=null;
 }
