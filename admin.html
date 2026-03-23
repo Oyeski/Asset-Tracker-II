@@ -1500,18 +1500,17 @@ const DEMO_COMPANIES=[
 async function loadCompanies(){
   if(CONFIGURED){
     try{
+      // Super Owner loads ALL companies. Admin/Sub-Admin: load all then filter client-side
+      // (RLS on Supabase is the true enforcement layer; this is UI scoping)
       const res=await sb.query('companies','?select=*&order=name.asc');
       if(Array.isArray(res)&&res.length){
         allCompanies=res;
-        // Mirror to localStorage as backup
         localStorage.setItem('atp_companies',JSON.stringify(res));
       } else if(Array.isArray(res)&&res.length===0){
-        // Supabase connected but empty — use localStorage backup if available
         const stored=localStorage.getItem('atp_companies');
         allCompanies=stored?JSON.parse(stored):DEMO_COMPANIES;
         if(!stored) toast('No companies found in database — showing demo data','info');
       } else {
-        // Supabase returned an error object
         console.warn('Supabase companies error:',res);
         const stored=localStorage.getItem('atp_companies');
         allCompanies=stored?JSON.parse(stored):DEMO_COMPANIES;
@@ -1527,18 +1526,30 @@ async function loadCompanies(){
     const stored=localStorage.getItem('atp_companies');
     allCompanies=stored?JSON.parse(stored):DEMO_COMPANIES;
   }
+
+  // Apply tenancy scoping AFTER loading all companies
+  // (getScopedCompanies relies on allCompanies being populated first)
   populateWorkspaceSelector();
   populateUsersCoFilter();
-  if(!activeCompanyId&&allCompanies.length){
-    activeCompanyId=allCompanies[0].id;
-    activeCompany=allCompanies[0];
+
+  // Auto-select: for non-super-owners, default to their own assigned company
+  if(!activeCompanyId){
+    const scoped=getScopedCompanies();
+    if(scoped.length){
+      // Prefer the user's own company_id if present
+      const own=scoped.find(c=>c.id===currentUser?.company_id)||scoped[0];
+      activeCompanyId=own.id;
+      activeCompany=own;
+    }
   }
 }
 
 function populateWorkspaceSelector(){
   const sel=document.getElementById('workspace-sel');
   if(!sel)return;
-  sel.innerHTML=allCompanies.map(c=>{
+  // Only show companies the current user is scoped to
+  const scoped=getScopedCompanies();
+  sel.innerHTML=scoped.map(c=>{
     const indent=c.parent_id?'&nbsp;&nbsp;↳ ':'';
     return `<option value="${c.id}" ${c.id===activeCompanyId?'selected':''}>${indent}${c.name}</option>`;
   }).join('');
@@ -1547,9 +1558,12 @@ function populateWorkspaceSelector(){
 function populateUsersCoFilter(){
   const sel=document.getElementById('users-co-filter');
   if(!sel)return;
-  sel.innerHTML='<option value="">All Companies</option>'+
-    allCompanies.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  const scoped=getScopedCompanies();
+  const label=isSuperOwner()?'All Companies':'All My Companies';
+  sel.innerHTML=`<option value="">${label}</option>`+
+    scoped.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
 }
+
 
 async function switchWorkspace(companyId){
   if(!companyId)return;
@@ -1671,11 +1685,15 @@ function renderCompanies(){
   const tree=document.getElementById('company-tree');
   const statsGrid=document.getElementById('co-stats-grid');
   if(!tree)return;
-  document.getElementById('co-count').textContent=allCompanies.length+' compan'+(allCompanies.length===1?'y':'ies');
 
-  // Build parent→children map
-  const roots=allCompanies.filter(c=>!c.parent_id);
-  const children=(pid)=>allCompanies.filter(c=>c.parent_id===pid);
+  // Scope to companies this user can see
+  const visibleCompanies=getScopedCompanies();
+  document.getElementById('co-count').textContent=visibleCompanies.length+' compan'+(visibleCompanies.length===1?'y':'ies');
+
+  // Build parent→children map within scoped set
+  const visibleIds=new Set(visibleCompanies.map(c=>c.id));
+  const roots=visibleCompanies.filter(c=>!c.parent_id||!visibleIds.has(c.parent_id));
+  const children=(pid)=>visibleCompanies.filter(c=>c.parent_id===pid);
   const INDUSTRY_COLORS={'Manufacturing':'var(--acc)','Aviation':'var(--acc4)','Healthcare':'var(--acc3)','Insurance':'var(--acc2)','General':'var(--acc5)'};
 
   function renderNode(c,depth){
@@ -1722,8 +1740,8 @@ function renderCompanies(){
     ?roots.map(r=>renderNode(r,0)).join('')
     :'<div style="text-align:center;padding:20px;font-size:12px;color:var(--text3);">No companies yet. Click + Add Company to create one.</div>';
 
-  // Stats cards per company
-  statsGrid.innerHTML=allCompanies.map(c=>{
+  // Stats cards per company — scoped
+  statsGrid.innerHTML=visibleCompanies.map(c=>{
     const ac=allAssets.filter(a=>a.company_id===c.id).length;
     const uc=allUsers.filter(u=>u.company_id===c.id).length;
     const color=INDUSTRY_COLORS[c.industry]||'var(--acc5)';
@@ -1786,7 +1804,7 @@ function openAddCompany(){
       <div class="fg"><div class="fl">Parent Company <span style="font-size:10px;color:var(--text3);">(optional)</span></div>
         <select class="fi" id="co-parent">
           <option value="">— Standalone entity —</option>
-          ${allCompanies.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}
+          ${getAddableParentOptions().map(c=>`<option value="${c.id}" ${c.id===(currentUser?.company_id)||''?'selected':''}>${c.name}</option>`).join('')}
         </select></div>
 
       <div class="fg"><div class="fl">Starting Taxonomy</div>
@@ -2378,32 +2396,49 @@ function doLogout(){
 // INIT
 // ══════════════════════════════════════════════════════
 async function initAdmin(){
-  // ── Step 1: Load all companies ──
+  // ── Step 1: Load all companies (scoped internally by loadCompanies) ──
   await loadCompanies();
 
   if(CONFIGURED){
     try{
-      // ── Step 2: Load ALL users and assets across all companies ──
-      const usersRes=await sb.query('users','?select=*');
+      const scopedIds=getScopedCompanyIds();
+      const ownId=currentUser?.company_id||null;
+
+      // ── Step 2: Load users scoped to this user's companies ──
+      // Super Owner: all users. Admin: users in their company tree. Sub-Admin: own company only.
+      let usersQuery='?select=*';
+      if(!isSuperOwner()&&scopedIds.length===1){
+        usersQuery=`?company_id=eq.${scopedIds[0]}&select=*`;
+      } else if(!isSuperOwner()&&scopedIds.length>1){
+        usersQuery=`?company_id=in.(${scopedIds.join(',')})&select=*`;
+      }
+      const usersRes=await sb.query('users',usersQuery);
       if(Array.isArray(usersRes)&&usersRes.length){
         allUsers=usersRes;
         localStorage.setItem('atp_users',JSON.stringify(usersRes));
       } else {
-        // Fall back to localStorage backup
         const stored=localStorage.getItem('atp_users');
         allUsers=stored?JSON.parse(stored):[];
         if(!usersRes||usersRes.code) toast('Could not load users from cloud — using local backup','err');
       }
-      const assetsRes=await sb.query('assets','?select=*&order=created_at.desc');
+
+      // ── Step 3: Load assets scoped to active company ──
+      // Always load by active company — dashboard and filters handle cross-company for Super Owner
+      const assetQuery=activeCompanyId
+        ?`?company_id=eq.${activeCompanyId}&select=*&order=created_at.desc`
+        :`?select=*&order=created_at.desc`;
+      const assetsRes=await sb.query('assets',assetQuery);
       if(Array.isArray(assetsRes)){
         allAssets=assetsRes;
       } else {
         allAssets=getLocalAssets();
         toast('Could not load assets from cloud — using local data','err');
       }
+
       auditLog=await sb.query('audit_log','?select=*&order=audited_at.desc&limit=500');
       if(!Array.isArray(auditLog))auditLog=[];
-      // ── Step 3: Load config for active company ──
+
+      // ── Step 4: Load config for active company ──
       if(activeCompanyId) await loadCompanyConfig(activeCompanyId);
     }catch(e){
       toast('Could not load data from Supabase — check config','err');
@@ -2424,10 +2459,10 @@ async function initAdmin(){
     if(activeCompanyId) await loadCompanyConfig(activeCompanyId);
   }
 
-  // ── Step 4: Set Live/Demo connection badge ──
+  // ── Step 5: Set Live/Demo connection badge ──
   updateConnBadge();
 
-  // ── Step 5: Render everything ──
+  // ── Step 6: Render everything ──
   populateTaxonomyEditor();
   populateLocsDepts();
   populateAssetFilters();
@@ -2438,18 +2473,31 @@ async function initAdmin(){
   refreshAllStatusDropdowns();
   refreshAllConditionDropdowns();
   refreshDash();
-  // Update workspace badge in dashboard
   updateWorkspaceBadge();
+  // Hide Companies panel nav for Sub-Admin (they can't manage companies)
+  applyRoleNavRestrictions();
 }
 
 function updateWorkspaceBadge(){
   const badge=document.getElementById('active-co-badge');
   if(badge&&activeCompany) badge.textContent=activeCompany.name;
-  // Update panel subtitle on users panel
   const sub=document.getElementById('users-panel-sub');
   if(sub) sub.textContent=activeCompany
     ?'Users assigned to: '+activeCompany.name+' — switch workspace to manage other companies'
     :'Showing all users across all companies';
+}
+
+// Hide nav items that don't apply to the current role
+function applyRoleNavRestrictions(){
+  // Companies panel: Sub-Admin cannot manage companies
+  const companyNav=document.querySelector('.nav-item[onclick="show(\'companies\')"]');
+  if(companyNav) companyNav.style.display=isSubAdmin()?'none':'flex';
+  // Workspace selector: hide for sub-admin (locked to one company)
+  const wsSel=document.getElementById('workspace-sel')?.closest('div[style]');
+  if(wsSel&&isSubAdmin()) wsSel.style.display='none';
+  // Add Company button: hide for sub-admin
+  const addCoBtn=document.querySelector('[onclick="openAddCompany()"]');
+  if(addCoBtn) addCoBtn.style.display=isSubAdmin()?'none':'';
 }
 
 function getLocalAssets(){
@@ -2764,16 +2812,59 @@ const ROLE_DEFS={
 };
 const SUB_ADMIN_BLOCKED=['setup','users','erp','database'];
 
+// ── Tenancy scope helpers ──────────────────────────────────
+// Super Owner sees everything. Admin sees own company + its sub-companies.
+// Sub-Admin sees own company only.
+function isSuperOwner(){ return currentUser&&currentUser.role==='super_owner'; }
+function isAdmin(){      return currentUser&&currentUser.role==='admin'; }
+function isSubAdmin(){   return currentUser&&currentUser.role==='sub_admin'; }
+
+// Returns the set of company IDs the current user is allowed to see/manage
+function getScopedCompanyIds(){
+  if(isSuperOwner()) return allCompanies.map(c=>c.id);  // all
+  if(!currentUser||!currentUser.company_id) return [];
+  const rootId=currentUser.company_id;
+  // Admin: own company + all companies where parent_id is in their tree
+  if(isAdmin()){
+    const ids=new Set([rootId]);
+    let changed=true;
+    while(changed){
+      changed=false;
+      allCompanies.forEach(c=>{
+        if(c.parent_id&&ids.has(c.parent_id)&&!ids.has(c.id)){ids.add(c.id);changed=true;}
+      });
+    }
+    return [...ids];
+  }
+  // Sub-Admin and others: own company only
+  return [rootId];
+}
+
+// Returns companies scoped to the current user
+function getScopedCompanies(){
+  const ids=new Set(getScopedCompanyIds());
+  return allCompanies.filter(c=>ids.has(c.id));
+}
+
+// Returns the parent options available when Admin adds a sub-company
+// (can only nest under their own company tree)
+function getAddableParentOptions(){
+  if(isSuperOwner()) return allCompanies;
+  return getScopedCompanies();
+}
+
+
 function renderUsers(){
   const el=document.getElementById('users-list');
   if(!el) return;
   const filterCo=document.getElementById('users-co-filter');
   const coFilter=filterCo?filterCo.value:'';
 
-  // Filter: if company filter is set use it, else show active workspace users
-  let users=allUsers.filter(u=>u.role!=='superadmin');
+  // Always restrict to scoped companies — non-super-owners can never see outside their tree
+  const scopedIds=new Set(getScopedCompanyIds());
+  let users=allUsers.filter(u=>u.role!=='superadmin'&&scopedIds.has(u.company_id));
   if(coFilter) users=users.filter(u=>u.company_id===coFilter);
-  else if(activeCompanyId) users=users.filter(u=>u.company_id===activeCompanyId||!u.company_id);
+  else if(activeCompanyId&&!isSuperOwner()) users=users.filter(u=>u.company_id===activeCompanyId||!u.company_id);
 
   const cnt=document.getElementById('users-count');
   if(cnt) cnt.textContent=users.length+' user'+(users.length!==1?'s':'');
@@ -2804,7 +2895,7 @@ function renderUsers(){
 }
 
 function openAddUser(){
-  const coOptions=allCompanies.map(c=>`<option value="${c.id}" ${c.id===activeCompanyId?'selected':''}>${c.name}</option>`).join('');
+  const coOptions=getScopedCompanies().map(c=>`<option value="${c.id}" ${c.id===activeCompanyId?'selected':''}>${c.name}</option>`).join('');
   const roleOptions=Object.entries(ROLE_DEFS).map(([k,v])=>`<option value="${k}">${v.emoji} ${v.label} — ${v.desc}</option>`).join('');
   openModal(`<div class="modal-ttl">Add User</div>
     <div class="fg"><div class="fl">Full Name <span class="req">REQUIRED</span></div>
@@ -2892,7 +2983,7 @@ async function saveNewUser(){
 function editUser(id){
   const u=allUsers.find(x=>(x.id||x.username)===id);
   if(!u)return;
-  const coOptions=allCompanies.map(c=>`<option value="${c.id}" ${c.id===u.company_id?'selected':''}>${c.name}</option>`).join('');
+  const coOptions=getScopedCompanies().map(c=>`<option value="${c.id}" ${c.id===u.company_id?'selected':''}>${c.name}</option>`).join('');
   const roleOptions=Object.entries(ROLE_DEFS).map(([k,v])=>`<option value="${k}" ${k===u.role?'selected':''}>${v.emoji} ${v.label} — ${v.desc}</option>`).join('');
   openModal(`<div class="modal-ttl">Edit User — ${u.name||u.username}</div>
     <div class="fg"><div class="fl">Full Name</div>
