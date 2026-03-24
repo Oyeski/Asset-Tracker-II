@@ -1,8 +1,9 @@
 name: Keep Supabase Alive
+
 on:
   schedule:
-    - cron: '0 9 */3 * *'  # Every 3 days at 9am UTC
-  workflow_dispatch:        # Also allows manual trigger
+    - cron: '0 9 */3 * *'  # Runs every 3 days at 9:00 AM UTC
+  workflow_dispatch:        # Manual trigger button
 
 jobs:
   ping:
@@ -10,8 +11,11 @@ jobs:
     steps:
       - name: Ping Supabase
         run: |
-          curl -s \
+          # The -f flag makes curl fail if the server returns an error
+          curl -s -f \
             -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
             "https://qeqiwcypmeexihqbvweu.supabase.co/rest/v1/companies?select=id&limit=1"
-          echo "Pinged at $(date)"
+          
+          # Using a standard ISO date format to avoid "Invalid time" logs
+          echo "Ping successful at $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
