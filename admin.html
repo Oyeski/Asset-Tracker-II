@@ -453,9 +453,25 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
           <div><div class="fl">Department</div><select class="fi" id="ast-dept" onchange="renderAssets()"><option value="">All</option></select></div>
         </div>
       </div>
+      <!-- Bulk action bar — shown when assets are selected -->
+      <div id="bulk-action-bar" style="display:none;background:rgba(214,48,64,.07);border:2px solid rgba(214,48,64,.2);
+        border-radius:var(--r-sm);padding:10px 16px;margin-bottom:10px;
+        display:none;align-items:center;justify-content:space-between;gap:12px;">
+        <div style="font-size:12px;font-weight:700;color:var(--acc3);">
+          <span id="bulk-count">0</span> asset(s) selected
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="act-btn btn-s" style="font-size:11px;padding:6px 12px;" onclick="selectAllAssets()">Select All</button>
+          <button class="act-btn btn-s" style="font-size:11px;padding:6px 12px;" onclick="clearAssetSelection()">Clear</button>
+          <button class="act-btn btn-d" style="font-size:11px;padding:6px 12px;" onclick="deleteSelectedAssets()">🗑 Delete Selected</button>
+        </div>
+      </div>
       <div class="card" style="padding:0;overflow:hidden;">
         <table class="tbl">
-          <thead><tr><th>Photo</th><th>Asset</th><th>Barcode</th><th>Category</th><th>Location</th><th>Dept</th><th>Custodian</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr>
+            <th style="width:36px;"><input type="checkbox" id="assets-select-all" title="Select all" onchange="toggleSelectAllAssets(this.checked)" style="accent-color:var(--acc3);width:14px;height:14px;cursor:pointer;"></th>
+            <th>Photo</th><th>Asset</th><th>Barcode</th><th>Category</th><th>Location</th><th>Dept</th><th>Custodian</th><th>Status</th><th>Actions</th>
+          </tr></thead>
           <tbody id="assets-tbody"></tbody>
         </table>
         <div id="assets-empty" style="display:none;padding:30px;text-align:center;font-size:12px;color:var(--text3);">No assets found.</div>
@@ -829,6 +845,7 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
               <option value="LOGIN">Login</option>
               <option value="REGISTER">Register</option>
               <option value="EDIT">Edit</option>
+              <option value="DELETE">Delete</option>
               <option value="PHOTO_RETAKE">Photo Retake</option>
               <option value="AUDIT">Audit</option>
             </select>
@@ -2640,7 +2657,6 @@ function renderAssets(){
   const st=(document.getElementById('ast-status')||{}).value||'';
   const cat=(document.getElementById('ast-cat')||{}).value||'';
   const dept=(document.getElementById('ast-dept')||{}).value||'';
-  // Always scope to active workspace
   const scopedAssets=activeCompanyId
     ?allAssets.filter(a=>a.company_id===activeCompanyId)
     :allAssets;
@@ -2653,6 +2669,9 @@ function renderAssets(){
   });
   const tbody=document.getElementById('assets-tbody');
   const empty=document.getElementById('assets-empty');
+  const selAll=document.getElementById('assets-select-all');
+  if(selAll)selAll.checked=false;
+  updateBulkBar();
   if(!filtered.length){tbody.innerHTML='';empty.style.display='block';return;}
   empty.style.display='none';
   tbody.innerHTML=filtered.map(a=>{
@@ -2660,13 +2679,14 @@ function renderAssets(){
     const th=img?`<img src="${img}" style="width:36px;height:28px;object-fit:cover;border-radius:5px;">`:
       `<div style="width:36px;height:28px;background:var(--surf2);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:12px;">📦</div>`;
     return `<tr>
+      <td><input type="checkbox" class="asset-cb" data-id="${a.id}" style="accent-color:var(--acc3);width:14px;height:14px;cursor:pointer;" onchange="updateBulkBar()"></td>
       <td>${th}</td>
-      <td><div style="font-size:12px;color:var(--text);">${a.name}</div><div style="font-size:9px;color:var(--text3);">${a.category||''}${a.sub_category?' › '+a.sub_category:''}</div></td>
+      <td><div style="font-size:12px;color:var(--text);">${a.name}</div><div style="font-size:9px;color:var(--text3);">${a.category||''}${a.sub_category?' > '+a.sub_category:''}</div></td>
       <td style="font-family:monospace;font-size:10px;color:var(--acc);">${a.barcode}</td>
-      <td style="font-size:11px;color:var(--text2);">${a.category||'—'}</td>
-      <td style="font-size:11px;color:var(--text2);">${a.location||'—'}</td>
-      <td style="font-size:11px;color:var(--text2);">${a.department||'—'}</td>
-      <td style="font-size:11px;color:var(--text2);">${a.custodian||'—'}</td>
+      <td style="font-size:11px;color:var(--text2);">${a.category||'--'}</td>
+      <td style="font-size:11px;color:var(--text2);">${a.location||'--'}</td>
+      <td style="font-size:11px;color:var(--text2);">${a.department||'--'}</td>
+      <td style="font-size:11px;color:var(--text2);">${a.custodian||'--'}</td>
       <td>${statusBadge(a.status)}</td>
       <td style="white-space:nowrap;">
         <button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;" onclick="editAsset('${a.id}')">Edit</button>
@@ -2677,6 +2697,64 @@ function renderAssets(){
 }
 
 function openAddAsset(){toast('Use the Field App to register assets. Admin can edit existing assets.','info');}
+
+function updateBulkBar(){
+  const checked=document.querySelectorAll('.asset-cb:checked');
+  const bar=document.getElementById('bulk-action-bar');
+  const cnt=document.getElementById('bulk-count');
+  if(!bar)return;
+  if(checked.length>0){bar.style.display='flex';if(cnt)cnt.textContent=checked.length;}
+  else bar.style.display='none';
+}
+
+function toggleSelectAllAssets(checked){
+  document.querySelectorAll('.asset-cb').forEach(cb=>cb.checked=checked);
+  updateBulkBar();
+}
+
+function selectAllAssets(){
+  document.querySelectorAll('.asset-cb').forEach(cb=>cb.checked=true);
+  const sa=document.getElementById('assets-select-all');if(sa)sa.checked=true;
+  updateBulkBar();
+}
+
+function clearAssetSelection(){
+  document.querySelectorAll('.asset-cb').forEach(cb=>cb.checked=false);
+  const sa=document.getElementById('assets-select-all');if(sa)sa.checked=false;
+  updateBulkBar();
+}
+
+async function deleteSelectedAssets(){
+  const checked=[...document.querySelectorAll('.asset-cb:checked')];
+  if(!checked.length){toast('No assets selected','err');return;}
+  const ids=checked.map(cb=>cb.dataset.id);
+  const names=ids.map(id=>allAssets.find(a=>a.id===id)?.name||id);
+  if(!confirm('Permanently delete '+ids.length+' asset'+(ids.length!==1?'s':'')+'?\n\n'+names.slice(0,5).join(', ')+(names.length>5?'...':'')+' \n\nThis cannot be undone.'))return;
+  let deleted=0,failed=0;
+  const now=new Date().toISOString();
+  for(const id of ids){
+    const asset=allAssets.find(a=>a.id===id);
+    if(!asset)continue;
+    if(CONFIGURED){
+      try{
+        await sb.remove('assets',id);
+        await sb.insert('audit_log',{
+          asset_id:id,company_id:asset.company_id||activeCompanyId||null,
+          barcode:asset.barcode||'',action:'DELETE',
+          changes:'Asset deleted: '+asset.name+' ('+( asset.barcode||'')+') -- '+(asset.category||'')+' -- '+(asset.location||''),
+          audited_by:currentUser?currentUser.username:'admin',
+          audited_at:now,notes:'Bulk delete -- '+ids.length+' assets'
+        });
+        deleted++;
+      }catch(e){failed++;}
+    } else {deleted++;}
+    allAssets=allAssets.filter(a=>a.id!==id);
+  }
+  clearAssetSelection();
+  toast((deleted?'Deleted '+deleted+' asset'+(deleted!==1?'s':''):'Delete failed')+(failed?' ('+failed+' failed)':''),deleted?'ok':'err');
+  renderAssets();refreshDash();
+  if(CONFIGURED)try{auditLog=await sb.query('audit_log','?select=*&order=audited_at.desc&limit=500');if(!Array.isArray(auditLog))auditLog=[];}catch(e){}
+}
 
 async function editAsset(id){
   const a=allAssets.find(x=>x.id===id);if(!a)return;
@@ -2754,8 +2832,33 @@ async function saveEditAsset(id){
 
 async function deleteAsset(id, name){
   if(!confirm(`Delete "${name}"? This cannot be undone.`))return;
-  if(CONFIGURED){try{await sb.remove('assets',id);}catch(e){toast('Delete failed','err');return;}}
+  const asset=allAssets.find(a=>a.id===id);
+  if(CONFIGURED){
+    try{
+      await sb.remove('assets',id);
+      if(asset){
+        await sb.insert('audit_log',{
+          asset_id:id,company_id:asset.company_id||activeCompanyId||null,
+          barcode:asset.barcode||'',action:'DELETE',
+          changes:`Asset deleted: ${asset.name} (${asset.barcode||''}) — ${asset.category||''} — ${asset.location||''}`,
+          audited_by:currentUser?currentUser.username:'admin',
+          audited_at:new Date().toISOString(),
+          notes:'Single delete from Asset Register'
+        });
+      }
+    }catch(e){toast('Delete failed','err');return;}
+  }
   allAssets=allAssets.filter(a=>a.id!==id);
+  // Update in-memory audit log so Activity History reflects immediately
+  if(asset){
+    auditLog.unshift({
+      id:'del-'+Date.now(),asset_id:id,barcode:asset.barcode||'',
+      action:'DELETE',
+      changes:`Asset deleted: ${asset.name} (${asset.barcode||''})`,
+      audited_by:currentUser?currentUser.username:'admin',
+      audited_at:new Date().toISOString()
+    });
+  }
   toast('Asset deleted','ok');renderAssets();refreshDash();
 }
 
@@ -4015,6 +4118,40 @@ function gsLog(msg,color='var(--text2)'){
 }
 
 function getGsUrl(){return (document.getElementById('gs-url')||{}).value?.trim()||'';}
+
+// Safely parse a date string from a Google Sheet into ISO format.
+// Handles: DD/MM/YYYY, MM/DD/YYYY, ISO 8601, and spreadsheet serial numbers.
+function parseFarDate(val){
+  if(!val||String(val).trim()==='')return null;
+  const s=String(val).trim();
+  // Already ISO
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)){
+    const d=new Date(s);return isNaN(d)?null:d.toISOString();
+  }
+  // DD/MM/YYYY or DD-MM-YYYY (Nigerian/UK format)
+  const dmy=s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+  if(dmy){
+    const yr=dmy[3].length===2?'20'+dmy[3]:dmy[3];
+    const d=new Date(`${yr}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`);
+    return isNaN(d)?null:d.toISOString();
+  }
+  // MM/DD/YYYY (US format fallback)
+  const mdy=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if(mdy){
+    const yr=mdy[3].length===2?'20'+mdy[3]:mdy[3];
+    const d=new Date(`${yr}-${mdy[1].padStart(2,'0')}-${mdy[2].padStart(2,'0')}`);
+    return isNaN(d)?null:d.toISOString();
+  }
+  // Google Sheets serial number (days since 30 Dec 1899)
+  if(/^\d+(\.\d+)?$/.test(s)){
+    const serial=parseFloat(s);
+    const d=new Date(Date.UTC(1899,11,30)+(serial*86400000));
+    return isNaN(d)?null:d.toISOString();
+  }
+  // Last resort — let JS try
+  const d=new Date(s);
+  return isNaN(d)?null:d.toISOString();
+}
 function getGsColMap(){
   const g=id=>(document.getElementById(id)||{}).value?.trim()||'';
   return {
@@ -4212,7 +4349,7 @@ async function pullFromSheets(){
         custodian:row[colMap.cust]||row['Custodian']||'',serial:row[colMap.serial]||row['Serial No.']||'',
         notes:row['Notes']||'',photos:[],registered_by:'FAR Import',
         company_id:activeCompanyId||null,
-        created_at:row['Date Registered']?new Date(row['Date Registered']).toISOString():now,
+        created_at:parseFarDate(row['Date Registered'])||now,
       };
       if(existing){
         Object.assign(existing,{name:asset.name,location:asset.location,department:asset.department,
@@ -4885,11 +5022,12 @@ function renderActivityTable(){
   };
 
   const ACTION_BADGE={
-    'LOGIN':   {cls:'ba', lbl:'Login'},
-    'REGISTER':{cls:'bu', lbl:'Register'},
-    'EDIT':    {cls:'bm', lbl:'Edit'},
-    'PHOTO_RETAKE':{cls:'bs', lbl:'Photo'},
-    'AUDIT':   {cls:'ba', lbl:'Audit'},
+    'LOGIN':        {cls:'ba', lbl:'Login'},
+    'REGISTER':     {cls:'bu', lbl:'Register'},
+    'EDIT':         {cls:'bm', lbl:'Edit'},
+    'DELETE':       {cls:'bd', lbl:'Delete'},
+    'PHOTO_RETAKE': {cls:'bs', lbl:'Photo'},
+    'AUDIT':        {cls:'ba', lbl:'Audit'},
   };
 
   tbody.innerHTML=activityFiltered.map(l=>{
